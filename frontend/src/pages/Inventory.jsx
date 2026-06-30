@@ -1,0 +1,342 @@
+import { useEffect, useState, useMemo } from "react";
+import { useLocation, useNavigate, Link } from "react-router-dom";
+import { api } from "@/lib/api";
+import { Plus, Search, LayoutGrid, List, X, MapPin, ChevronRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import CostumeFormDialog from "@/components/CostumeFormDialog";
+import { toast } from "sonner";
+
+const SIZES = ["XS", "S", "M", "L", "XL"];
+const ALL = "__all__";
+
+export default function Inventory() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [costumes, setCostumes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [categories, setCategories] = useState([]);
+  const [locations, setLocations] = useState([]);
+  const [q, setQ] = useState("");
+  const [category, setCategory] = useState(ALL);
+  const [loc, setLoc] = useState(ALL);
+  const [size, setSize] = useState(ALL);
+  const [view, setView] = useState("grid");
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+
+  const fetchAll = async () => {
+    setLoading(true);
+    try {
+      const params = {};
+      if (q.trim()) params.q = q.trim();
+      if (category !== ALL) params.category = category;
+      if (loc !== ALL) params.location = loc;
+      if (size !== ALL) params.size = size;
+      const [c, cats, locs] = await Promise.all([
+        api.get("/costumes", { params }),
+        api.get("/categories"),
+        api.get("/locations"),
+      ]);
+      setCostumes(c.data);
+      setCategories(cats.data);
+      setLocations(locs.data);
+    } catch (e) {
+      console.error(e);
+      toast.error("Failed to load inventory");
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    fetchAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category, loc, size]);
+
+  useEffect(() => {
+    const t = setTimeout(() => fetchAll(), 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q]);
+
+  useEffect(() => {
+    const sp = new URLSearchParams(location.search);
+    if (sp.get("new") === "1") {
+      setEditing(null);
+      setDialogOpen(true);
+      navigate("/inventory", { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
+
+  const handleNew = () => { setEditing(null); setDialogOpen(true); };
+  const handleEdit = (c) => { setEditing(c); setDialogOpen(true); };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm("Delete this costume? This cannot be undone.")) return;
+    try {
+      await api.delete(`/costumes/${id}`);
+      toast.success("Costume deleted");
+      fetchAll();
+    } catch {
+      toast.error("Failed to delete");
+    }
+  };
+
+  const handleSaved = () => { setDialogOpen(false); fetchAll(); };
+
+  const filterCount = useMemo(() => {
+    return (q ? 1 : 0) + (category !== ALL ? 1 : 0) + (loc !== ALL ? 1 : 0) + (size !== ALL ? 1 : 0);
+  }, [q, category, loc, size]);
+
+  const clearFilters = () => {
+    setQ(""); setCategory(ALL); setLoc(ALL); setSize(ALL);
+  };
+
+  return (
+    <div className="space-y-8" data-testid="inventory-page">
+      <div className="flex items-end justify-between flex-wrap gap-4">
+        <div className="space-y-2">
+          <div className="eyebrow">INDEX 02 / INVENTORY</div>
+          <h1 className="font-display text-4xl sm:text-5xl tracking-tight font-bold text-[#09090B]">
+            All Costumes
+          </h1>
+          <p className="text-sm text-[#71717A]">{costumes.length} {costumes.length === 1 ? "item" : "items"} found</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex border border-[#E4E4E7]">
+            <button
+              data-testid="view-grid-btn"
+              onClick={() => setView("grid")}
+              className={`p-2.5 ${view === "grid" ? "bg-[#09090B] text-white" : "bg-white text-[#09090B]"}`}
+              aria-label="Grid view"
+            >
+              <LayoutGrid className="h-4 w-4" />
+            </button>
+            <button
+              data-testid="view-list-btn"
+              onClick={() => setView("list")}
+              className={`p-2.5 ${view === "list" ? "bg-[#09090B] text-white" : "bg-white text-[#09090B]"}`}
+              aria-label="List view"
+            >
+              <List className="h-4 w-4" />
+            </button>
+          </div>
+          <Button data-testid="add-costume-btn" onClick={handleNew} className="bg-[#09090B] hover:bg-[#27272A] rounded-none text-white h-10">
+            <Plus className="h-4 w-4 mr-1" />Add Costume
+          </Button>
+        </div>
+      </div>
+
+      {/* Filter bar */}
+      <div className="border border-[#E4E4E7] p-4 md:p-5">
+        <div className="grid md:grid-cols-12 gap-3">
+          <div className="md:col-span-5 relative">
+            <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#71717A]" />
+            <Input
+              data-testid="search-input"
+              placeholder="Search by name, category, location…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              className="pl-10 h-11 rounded-none border-[#E4E4E7]"
+            />
+          </div>
+          <div className="md:col-span-2">
+            <Select value={category} onValueChange={setCategory}>
+              <SelectTrigger data-testid="filter-category" className="h-11 rounded-none border-[#E4E4E7]">
+                <SelectValue placeholder="Category" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>All categories</SelectItem>
+                {categories.map((c) => (
+                  <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="md:col-span-3">
+            <Select value={loc} onValueChange={setLoc}>
+              <SelectTrigger data-testid="filter-location" className="h-11 rounded-none border-[#E4E4E7]">
+                <SelectValue placeholder="Location" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>All locations</SelectItem>
+                {locations.map((l) => (
+                  <SelectItem key={l.id} value={l.name}>{l.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="md:col-span-2">
+            <Select value={size} onValueChange={setSize}>
+              <SelectTrigger data-testid="filter-size" className="h-11 rounded-none border-[#E4E4E7]">
+                <SelectValue placeholder="Size available" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>Any size</SelectItem>
+                {SIZES.map((s) => (
+                  <SelectItem key={s} value={s}>Size {s}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        {filterCount > 0 && (
+          <button
+            data-testid="clear-filters-btn"
+            onClick={clearFilters}
+            className="mt-3 inline-flex items-center gap-1 text-xs text-[#71717A] hover:text-[#09090B]"
+          >
+            <X className="h-3 w-3" /> Clear {filterCount} filter{filterCount > 1 ? "s" : ""}
+          </button>
+        )}
+      </div>
+
+      {/* Results */}
+      {loading ? (
+        <div className="py-20 text-center eyebrow">LOADING…</div>
+      ) : costumes.length === 0 ? (
+        <div className="border border-[#E4E4E7] p-12 text-center" data-testid="empty-state">
+          <p className="text-[#71717A] mb-4">No costumes match your filters.</p>
+          {filterCount > 0 ? (
+            <Button onClick={clearFilters} variant="outline" className="rounded-none">Clear filters</Button>
+          ) : (
+            <Button onClick={handleNew} className="bg-[#09090B] text-white rounded-none">
+              <Plus className="h-4 w-4 mr-1" />Add your first costume
+            </Button>
+          )}
+        </div>
+      ) : view === "grid" ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-px bg-[#E4E4E7] border border-[#E4E4E7]">
+          {costumes.map((c) => (
+            <CostumeCard key={c.id} costume={c} onEdit={handleEdit} onDelete={handleDelete} />
+          ))}
+        </div>
+      ) : (
+        <CostumeTable costumes={costumes} onEdit={handleEdit} onDelete={handleDelete} />
+      )}
+
+      <CostumeFormDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        editing={editing}
+        categories={categories}
+        locations={locations}
+        onSaved={handleSaved}
+      />
+    </div>
+  );
+}
+
+function CostumeCard({ costume, onEdit, onDelete }) {
+  return (
+    <div className="bg-white p-5 group hover:bg-[#FAFAFA] transition-colors flex flex-col" data-testid={`costume-card-${costume.id}`}>
+      <Link to={`/costume/${costume.id}`} className="block">
+        <div className="aspect-[4/5] image-empty overflow-hidden mb-4">
+          {costume.image_id ? (
+            <img
+              src={`${process.env.REACT_APP_BACKEND_URL}/api/images/${costume.image_id}`}
+              alt={costume.name}
+              className="w-full h-full object-cover"
+            />
+          ) : null}
+        </div>
+      </Link>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="eyebrow truncate">{costume.category}</div>
+          <Link to={`/costume/${costume.id}`}>
+            <h3 className="font-display font-semibold text-lg text-[#09090B] truncate mt-1 hover:underline">
+              {costume.name}
+            </h3>
+          </Link>
+          <div className="flex items-center text-xs text-[#71717A] mt-1.5 gap-1">
+            <MapPin className="h-3 w-3 shrink-0" />
+            <span className="truncate">{costume.location}</span>
+          </div>
+        </div>
+        <div className="text-right shrink-0">
+          <div className="font-display text-2xl font-bold tabular-nums text-[#09090B]">{costume.total_quantity}</div>
+          <div className="eyebrow text-[9px]">UNITS</div>
+        </div>
+      </div>
+      <div className="flex gap-1 mt-4 flex-wrap">
+        {SIZES.map((s) => {
+          const q = costume.sizes?.[s] || 0;
+          return (
+            <Badge key={s} variant="outline" className={`rounded-none border ${q > 0 ? "border-[#09090B] text-[#09090B]" : "border-[#E4E4E7] text-[#A1A1AA]"}`}>
+              <span className="font-mono-label text-[10px]">{s}</span>
+              <span className="tabular-nums text-[10px] ml-1">{q}</span>
+            </Badge>
+          );
+        })}
+      </div>
+      <div className="flex gap-2 mt-4 pt-4 border-t border-[#E4E4E7]">
+        <button
+          data-testid={`edit-${costume.id}`}
+          onClick={() => onEdit(costume)}
+          className="text-xs font-medium text-[#09090B] hover:underline"
+        >
+          Edit
+        </button>
+        <span className="text-[#E4E4E7]">|</span>
+        <button
+          data-testid={`delete-${costume.id}`}
+          onClick={() => onDelete(costume.id)}
+          className="text-xs font-medium text-[#EF4444] hover:underline"
+        >
+          Delete
+        </button>
+        <Link
+          to={`/costume/${costume.id}`}
+          data-testid={`view-${costume.id}`}
+          className="ml-auto text-xs font-medium text-[#09090B] hover:underline inline-flex items-center"
+        >
+          View <ChevronRight className="h-3 w-3" />
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+function CostumeTable({ costumes, onEdit, onDelete }) {
+  return (
+    <div className="border border-[#E4E4E7] overflow-x-auto" data-testid="costume-table">
+      <table className="w-full text-sm">
+        <thead className="bg-[#FAFAFA] border-b border-[#E4E4E7]">
+          <tr className="text-left">
+            <th className="px-4 py-3 eyebrow">Name</th>
+            <th className="px-4 py-3 eyebrow">Category</th>
+            <th className="px-4 py-3 eyebrow">Location</th>
+            {SIZES.map((s) => <th key={s} className="px-2 py-3 eyebrow text-center">{s}</th>)}
+            <th className="px-4 py-3 eyebrow text-right">Total</th>
+            <th className="px-4 py-3 eyebrow text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {costumes.map((c) => (
+            <tr key={c.id} className="border-b border-[#E4E4E7] hover:bg-[#FAFAFA]" data-testid={`row-${c.id}`}>
+              <td className="px-4 py-3">
+                <Link to={`/costume/${c.id}`} className="font-medium text-[#09090B] hover:underline">{c.name}</Link>
+              </td>
+              <td className="px-4 py-3 text-[#52525B]">{c.category}</td>
+              <td className="px-4 py-3 text-[#52525B]">{c.location}</td>
+              {SIZES.map((s) => (
+                <td key={s} className="px-2 py-3 text-center tabular-nums">{c.sizes?.[s] || 0}</td>
+              ))}
+              <td className="px-4 py-3 text-right font-semibold tabular-nums">{c.total_quantity}</td>
+              <td className="px-4 py-3 text-right">
+                <button onClick={() => onEdit(c)} data-testid={`row-edit-${c.id}`} className="text-xs font-medium text-[#09090B] hover:underline mr-3">Edit</button>
+                <button onClick={() => onDelete(c.id)} data-testid={`row-delete-${c.id}`} className="text-xs font-medium text-[#EF4444] hover:underline">Delete</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
