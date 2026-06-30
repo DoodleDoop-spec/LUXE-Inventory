@@ -1,0 +1,75 @@
+{
+  "theme": "light",
+  "archetype": "Swiss & High-Contrast",
+  "typography": {
+    "heading_font": "Satoshi",
+    "body_font": "IBM Plex Sans",
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl tracking-tight font-bold",
+      "h2": "text-2xl sm:text-3xl tracking-tight font-semibold",
+      "h3": "text-xl sm:text-2xl tracking-tight font-medium",
+      "body": "text-base leading-relaxed",
+      "labels": "text-xs tracking-[0.2em] uppercase font-medium"
+    }
+  },
+  "colors": {
+    "background": "#FFFFFF",
+    "surface": "#F8F9FA",
+    "primary": "#0F172A",
+    "primary_hover": "#1E293B",
+    "text_main": "#09090B",
+    "text_muted": "#71717A",
+    "border": "#E4E4E7",
+    "accent_success": "#10B981",
+    "accent_danger": "#EF4444"
+  },
+  "spacing_and_layout": {
+    "general": "Use generous spacing. Containers with borders must have internal padding (p-6 or p-8).",
+    "dashboard_grid": "The 'Control Room' Grid. Base grid: grid-cols-1 md:grid-cols-3 lg:grid-cols-4. Tight gaps (gap-4 or gap-6). Use h-full to stretch children.",
+    "alignment": "Left-align dense content and data. Use optical alignment for buttons with icons."
+  },
+  "surfaces": {
+    "cards": "Flat background, 1px subtle border (border-border), no shadow. On hover: slight lift (-translate-y-1), subtle shadow (shadow-lg), border color darkens.",
+    "header": "Solid Background with a hard bottom border. Sticky positioning with z-50."
+  },
+  "motion": {
+    "hover_states": "All interactive elements must have explicit hover states (color change, subtle transform).",
+    "transitions": "Use specific properties like transition: transform 0.2s ease, opacity 0.2s ease, background-color 0.2s ease."
+  },
+  "icons_library": "lucide-react",
+  "component_instructions": {
+    "navigation": "Sidebar or top nav with clear branding, 3-5 links, and primary CTA if needed.",
+    "tables": "Use Shadcn Table component. Clean lines, text-left alignment.",
+    "forms": "Use Shadcn Form, Input, Select components. Customise with standard border and focus states (focus:ring-2 focus:ring-primary).",
+    "modals": "Use Shadcn Dialog for Add/Edit costume forms.",
+    "buttons": "Flat design, rounded-md, distinct primary and secondary variants.",
+    "testing": "All interactive and key informational elements MUST include a data-testid attribute in kebab-case format."
+  },
+  "media": {
+    "logo": [
+      {
+        "url": "https://images.unsplash.com/photo-1760037034804-2dce280659e2?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1OTV8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMGNvcnBvcmF0ZSUyMGJyYW5kJTIwbG9nb3xlbnwwfHx8fDE3ODI4NjMyNzV8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Abstract corporate brand logo for header",
+        "category": "logo"
+      }
+    ],
+    "placeholders": [
+      {
+        "url": "https://images.unsplash.com/photo-1767979400609-23f7659be8ea?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzV8MHwxfHNlYXJjaHwyfHxzdGFnZSUyMGNvc3R1bWV8ZW58MHx8fHwxNzgyODYzMjc2fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Performers in animal masks on stage.",
+        "category": "costume_mock_1"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1770413692756-0e6168a3fb2e?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzV8MHwxfHNlYXJjaHwxfHxzdGFnZSUyMGNvc3R1bWV8ZW58MHx8fHwxNzgyODYzMjc2fDA&ixlib=rb-4.1.0&q=85",
+        "description": "Performer in elaborate costume dances on stage",
+        "category": "costume_mock_2"
+      },
+      {
+        "url": "https://images.unsplash.com/photo-1540221652346-e5dd6b50f3e7?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1ODB8MHwxfHNlYXJjaHwweHxjbG90aGluZyUyMHJhY2slMjB3YXJkcm9iZXxlbnwwfHx8fDE3ODI4NjMyNzV8MA&ixlib=rb-4.1.0&q=85",
+        "description": "Assorted color clothes lot hanging on wooden wall rack",
+        "category": "dashboard_hero_bg"
+      }
+    ]
+  },
+  "instructions_to_main_agent": "Implement a clean, corporate dashboard layout. Create a dashboard summary view, an inventory list (with toggleable grid/table views), and an add/edit form (Shadcn Dialog). Ensure all mock data utilizes the provided image URLs. Ensure the application adheres to the Swiss & High-Contrast archetype. Enforce data-testid on every interactive element."
+}
