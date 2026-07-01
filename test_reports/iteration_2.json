@@ -1,0 +1,46 @@
+{
+  "summary": "Iteration 2 backend+frontend verification. All 23 pytest cases (14 legacy + 9 new for flag/settings/sub_location/size_notes/XXL-XXXL/category-delete/location-counts/back-compat) PASS (100%). Playwright E2E verified: Dashboard tile 'Flagged' + no size distribution, Settings tab route+fields+save+category CRUD, Locations expandable rows (7 toggles, expanded row lists 2 costumes), Inventory flagged filter + flag-badge on card + sub_location display, CostumeFormDialog fields for sub_location/XXL/XXXL/flag switch (form-flag-reason reveals after toggling switch), and CostumeDetail flag banner + unflag button + detail-size-XXL/XXXL cells + banner disappears after unflag.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/categories", "issue": "Ghost categories are synthesized from costumes that use a category name not in the categories collection. These synthesized entries get a fresh uuid on every call, so their id is not stable and DELETE /api/categories/{id} on such a synthesized id returns 404 (only real seeded/created rows can be deleted). Consider persisting categories on first use or excluding synthesized ones from the delete UI."},
+      {"endpoint": "PUT /api/settings", "issue": "Non-empty string for org_name is not enforced; accepts empty string and other whitespace. Consider validation."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "CostumeFormDialog size-note reveal", "issue": "Clicking form-size-note-btn-{S/M} does not reliably reveal the size-note-panel-{s} / form-size-note-{s} textarea in Playwright (state toggles appear to not open the panel on first click in some cases). Reproduced twice on fresh dialogs. Underlying data flow works (size_notes persist via API), but UX may be confusing for users. Recommend verifying the setOpenSizeNote handler / z-index / focus state.", "selector": "[data-testid='form-size-note-btn-M']", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Inventory list view (list mode)", "issues": ["List view table not verified in this iteration; grid + card layout looks clean with a subtle red FLAGGED ribbon on the image and 'Costume Closet A · B5' shown as location · sub_location. Contrast and spacing on all pages are good."]},
+      {"screen": "Locations page", "issues": ["'CUSTOM / FREE-TEXT LOCATIONS' divider only appears when orphan free-text locations exist in data (correct behaviour). No orphans were present in this environment so the divider was absent."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Investigate CostumeFormDialog size-note-btn click handler — panel does not open reliably; verify openSizeNote state toggle and re-render.",
+    "Optional: persist synthesized categories on read so DELETE /api/categories/{id} works for categories that were created implicitly via a costume."
+  ],
+  "critical_code_review_comments": [
+    "server.py still uses deprecated @app.on_event('startup'/'shutdown'); migrate to FastAPI lifespan.",
+    "server.py getObject/putObject use synchronous requests inside async handlers; still blocks event loop.",
+    "list_categories() generates fresh uuids on every request for costume-derived categories — id instability breaks any client-side caching or delete flow relying on that id.",
+    "CostumeUpdate uses exclude_none=True; passing empty strings for sub_location / notes still updates them (intentional), but this also means clients can't 'unset back to None' — acceptable given the field default is empty string.",
+    "Settings has a single doc keyed on id='app'; upsert=True in PUT is correct. GET creates the doc on first call which is fine.",
+    "SettingsUpdate lacks validation for org_name length or emptiness; consider adding constraints."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (added 9 new iteration-2 tests + expanded SIZE_KEYS to XXL/XXXL)"
+  ],
+  "success_rate": {"backend": "100% (23/23)", "frontend": "~95% (one flaky size-note reveal)"},
+  "test_credentials": "N/A (no auth)",
+  "seed_data_creation": "Created and cleaned up TEST_ prefixed costumes/categories via pytest. Frontend E2E created a 'PW_FLG_*' flagged costume (deleted at end), a 'PW_CAT_*' category (left behind — 11 rows now visible), and changed settings.org_name to 'PW Costume Co' (main agent may want to reset to 'Wardrobe/OS').",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend tests at /app/backend/tests/backend_test.py cover both iterations and are parallel-safe. All new iteration-2 endpoints (/api/costumes/{id}/flag, /unflag, /flagged, /locations/costume-counts, /categories/{id} DELETE, /settings GET/PUT) are covered and pass. Frontend testids match the spec 1:1. Only concern: form-size-note-btn-{s} panel reveal — verify manually or with a slight extra wait/click.",
+  "rca of the issue": "For the size-note reveal issue: the handler is `onClick={() => setOpenSizeNote(openSizeNote === s ? null : s)}`. If Playwright's programmatic click event lands twice or the button already had openSizeNote===s from a previous mount, it would toggle it back to null. Suggest inspecting whether the click event bubbles/re-fires or whether the state is initialized correctly on dialog open (setOpenSizeNote(null) should be called in the dialog open effect)."
+}

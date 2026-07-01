@@ -106,28 +106,40 @@ api_router = APIRouter(prefix="/api")
 
 
 # --------- Models ---------
-SIZE_KEYS = ["XS", "S", "M", "L", "XL"]
+SIZE_KEYS = ["XS", "S", "M", "L", "XL", "XXL", "XXXL"]
 
 
 class CostumeBase(BaseModel):
     name: str
     category: str
     location: str
+    sub_location: Optional[str] = ""
     notes: Optional[str] = ""
     sizes: Dict[str, int] = Field(default_factory=lambda: {k: 0 for k in SIZE_KEYS})
+    size_notes: Dict[str, str] = Field(default_factory=lambda: {k: "" for k in SIZE_KEYS})
 
 
 class CostumeCreate(CostumeBase):
     image_id: Optional[str] = None
+    is_flagged: Optional[bool] = False
+    flag_reason: Optional[str] = ""
 
 
 class CostumeUpdate(BaseModel):
     name: Optional[str] = None
     category: Optional[str] = None
     location: Optional[str] = None
+    sub_location: Optional[str] = None
     notes: Optional[str] = None
     sizes: Optional[Dict[str, int]] = None
+    size_notes: Optional[Dict[str, str]] = None
     image_id: Optional[str] = None
+    is_flagged: Optional[bool] = None
+    flag_reason: Optional[str] = None
+
+
+class FlagPayload(BaseModel):
+    reason: str
 
 
 class Costume(BaseModel):
@@ -136,10 +148,15 @@ class Costume(BaseModel):
     name: str
     category: str
     location: str
+    sub_location: str = ""
     notes: str = ""
     sizes: Dict[str, int]
+    size_notes: Dict[str, str] = Field(default_factory=dict)
     total_quantity: int
     image_id: Optional[str] = None
+    is_flagged: bool = False
+    flag_reason: str = ""
+    flagged_at: Optional[str] = None
     created_at: str
     updated_at: str
 
@@ -187,6 +204,7 @@ async def get_stats():
         "category_count": len(categories),
         "locations_in_use": locations_in_use,
         "by_size": by_size,
+        "flagged_count": sum(1 for c in costumes if c.get("is_flagged")),
     }
 
 
@@ -196,6 +214,7 @@ async def list_costumes(
     category: Optional[str] = None,
     location: Optional[str] = None,
     size: Optional[str] = None,
+    flagged: Optional[bool] = None,
 ):
     query: Dict = {}
     if q:
@@ -203,6 +222,7 @@ async def list_costumes(
             {"name": {"$regex": q, "$options": "i"}},
             {"category": {"$regex": q, "$options": "i"}},
             {"location": {"$regex": q, "$options": "i"}},
+            {"sub_location": {"$regex": q, "$options": "i"}},
             {"notes": {"$regex": q, "$options": "i"}},
         ]
     if category:
@@ -211,6 +231,8 @@ async def list_costumes(
         query["location"] = location
     if size and size in SIZE_KEYS:
         query[f"sizes.{size}"] = {"$gt": 0}
+    if flagged is not None:
+        query["is_flagged"] = flagged
     docs = await db.costumes.find(query, {"_id": 0}).sort("updated_at", -1).to_list(2000)
     return docs
 
@@ -227,15 +249,21 @@ async def get_costume(costume_id: str):
 async def create_costume(payload: CostumeCreate):
     now = _now_iso()
     sizes = {k: int(payload.sizes.get(k, 0)) for k in SIZE_KEYS}
+    size_notes = {k: str((payload.size_notes or {}).get(k, "") or "") for k in SIZE_KEYS}
     doc = {
         "id": str(uuid.uuid4()),
         "name": payload.name.strip(),
         "category": payload.category.strip(),
         "location": payload.location.strip(),
+        "sub_location": (payload.sub_location or "").strip(),
         "notes": (payload.notes or "").strip(),
         "sizes": sizes,
+        "size_notes": size_notes,
         "total_quantity": _compute_total(sizes),
         "image_id": payload.image_id,
+        "is_flagged": bool(payload.is_flagged),
+        "flag_reason": (payload.flag_reason or "").strip() if payload.is_flagged else "",
+        "flagged_at": now if payload.is_flagged else None,
         "created_at": now,
         "updated_at": now,
     }
@@ -254,8 +282,47 @@ async def update_costume(costume_id: str, payload: CostumeUpdate):
         sizes = {k: int(updates["sizes"].get(k, 0)) for k in SIZE_KEYS}
         updates["sizes"] = sizes
         updates["total_quantity"] = _compute_total(sizes)
+    if "size_notes" in updates:
+        updates["size_notes"] = {k: str(updates["size_notes"].get(k, "") or "") for k in SIZE_KEYS}
+    if "is_flagged" in updates:
+        if updates["is_flagged"]:
+            updates["flagged_at"] = _now_iso()
+        else:
+            updates["flagged_at"] = None
+            updates["flag_reason"] = ""
     updates["updated_at"] = _now_iso()
     await db.costumes.update_one({"id": costume_id}, {"$set": updates})
+    doc = await db.costumes.find_one({"id": costume_id}, {"_id": 0})
+    return doc
+
+
+@api_router.post("/costumes/{costume_id}/flag", response_model=Costume)
+async def flag_costume(costume_id: str, payload: FlagPayload):
+    existing = await db.costumes.find_one({"id": costume_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Costume not found")
+    await db.costumes.update_one(
+        {"id": costume_id},
+        {"$set": {
+            "is_flagged": True,
+            "flag_reason": payload.reason.strip(),
+            "flagged_at": _now_iso(),
+            "updated_at": _now_iso(),
+        }}
+    )
+    doc = await db.costumes.find_one({"id": costume_id}, {"_id": 0})
+    return doc
+
+
+@api_router.post("/costumes/{costume_id}/unflag", response_model=Costume)
+async def unflag_costume(costume_id: str):
+    existing = await db.costumes.find_one({"id": costume_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Costume not found")
+    await db.costumes.update_one(
+        {"id": costume_id},
+        {"$set": {"is_flagged": False, "flag_reason": "", "flagged_at": None, "updated_at": _now_iso()}}
+    )
     doc = await db.costumes.find_one({"id": costume_id}, {"_id": 0})
     return doc
 
@@ -273,6 +340,19 @@ async def delete_costume(costume_id: str):
 async def list_locations():
     docs = await db.locations.find({}, {"_id": 0}).sort("name", 1).to_list(1000)
     return docs
+
+
+@api_router.get("/locations/costume-counts")
+async def location_costume_counts():
+    """Return {location_name: count} for each location currently used."""
+    pipeline = [
+        {"$group": {"_id": "$location", "count": {"$sum": 1}, "items": {"$sum": "$total_quantity"}}},
+    ]
+    counts = {}
+    async for row in db.costumes.aggregate(pipeline):
+        if row["_id"]:
+            counts[row["_id"]] = {"count": row["count"], "items": row["items"]}
+    return counts
 
 
 @api_router.post("/locations", response_model=LocationItem)
@@ -323,6 +403,57 @@ async def create_category(payload: LocationCreate):
     await db.categories.insert_one(doc)
     doc.pop("_id", None)
     return doc
+
+
+@api_router.delete("/categories/{category_id}")
+async def delete_category(category_id: str):
+    doc = await db.categories.find_one({"id": category_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Category not found")
+    # Check if any costume uses this category
+    in_use = await db.costumes.count_documents({"category": doc["name"]})
+    if in_use > 0:
+        raise HTTPException(status_code=409, detail=f"Category is used by {in_use} costume(s)")
+    await db.categories.delete_one({"id": category_id})
+    return {"ok": True}
+
+
+# --------- Settings Routes ---------
+@api_router.get("/settings")
+async def get_settings():
+    doc = await db.settings.find_one({"id": "app"}, {"_id": 0})
+    if not doc:
+        doc = {
+            "id": "app",
+            "org_name": "Wardrobe/OS",
+            "default_view": "grid",
+            "show_flag_banner": True,
+        }
+        await db.settings.insert_one(doc)
+        doc.pop("_id", None)
+    return doc
+
+
+class SettingsUpdate(BaseModel):
+    org_name: Optional[str] = None
+    default_view: Optional[str] = None
+    show_flag_banner: Optional[bool] = None
+
+
+@api_router.put("/settings")
+async def update_settings(payload: SettingsUpdate):
+    updates = {k: v for k, v in payload.model_dump(exclude_none=True).items()}
+    if "default_view" in updates and updates["default_view"] not in ("grid", "list"):
+        raise HTTPException(status_code=400, detail="default_view must be 'grid' or 'list'")
+    await db.settings.update_one({"id": "app"}, {"$set": updates}, upsert=True)
+    doc = await db.settings.find_one({"id": "app"}, {"_id": 0})
+    return doc
+
+
+@api_router.get("/flagged", response_model=List[Costume])
+async def list_flagged():
+    docs = await db.costumes.find({"is_flagged": True}, {"_id": 0}).sort("flagged_at", -1).to_list(1000)
+    return docs
 
 
 # --------- Upload / Image Routes ---------

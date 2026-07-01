@@ -1,10 +1,11 @@
 import { Outlet, NavLink, Link, useLocation } from "react-router-dom";
-import { LayoutDashboard, Shirt, MapPin, Sparkles } from "lucide-react";
+import { LayoutDashboard, Shirt, MapPin, Sparkles, Settings as SettingsIcon } from "lucide-react";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, testId: "nav-dashboard" },
   { to: "/inventory", label: "Inventory", icon: Shirt, testId: "nav-inventory" },
   { to: "/locations", label: "Locations", icon: MapPin, testId: "nav-locations" },
+  { to: "/settings", label: "Settings", icon: SettingsIcon, testId: "nav-settings" },
 ];
 
 export default function Layout() {
@@ -52,7 +53,7 @@ export default function Layout() {
       <footer className="border-t border-[#E4E4E7] mt-16">
         <div className="max-w-[1400px] mx-auto px-6 md:px-10 py-6 flex items-center justify-between">
           <span className="eyebrow">WARDROBE/OS — INTERNAL TOOL</span>
-          <span className="eyebrow">v 1.0</span>
+          <span className="eyebrow">v 1.1</span>
         </div>
       </footer>
     </div>

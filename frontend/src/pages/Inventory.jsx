@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { api } from "@/lib/api";
-import { Plus, Search, LayoutGrid, List, X, MapPin, ChevronRight } from "lucide-react";
+import { Plus, Search, LayoutGrid, List, X, MapPin, ChevronRight, Flag, StickyNote } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import CostumeFormDialog from "@/components/CostumeFormDialog";
 import { toast } from "sonner";
 
-const SIZES = ["XS", "S", "M", "L", "XL"];
+const SIZES = ["XS", "S", "M", "L", "XL", "XXL", "XXXL"];
 const ALL = "__all__";
 
 export default function Inventory() {
@@ -25,9 +25,20 @@ export default function Inventory() {
   const [category, setCategory] = useState(ALL);
   const [loc, setLoc] = useState(ALL);
   const [size, setSize] = useState(ALL);
+  const [flaggedOnly, setFlaggedOnly] = useState(false);
   const [view, setView] = useState("grid");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState(null);
+
+  // Fetch default view from settings once
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await api.get("/settings");
+        if (r.data?.default_view === "list") setView("list");
+      } catch { /* ignore */ }
+    })();
+  }, []);
 
   const fetchAll = async () => {
     setLoading(true);
@@ -37,6 +48,7 @@ export default function Inventory() {
       if (category !== ALL) params.category = category;
       if (loc !== ALL) params.location = loc;
       if (size !== ALL) params.size = size;
+      if (flaggedOnly) params.flagged = true;
       const [c, cats, locs] = await Promise.all([
         api.get("/costumes", { params }),
         api.get("/categories"),
@@ -55,7 +67,7 @@ export default function Inventory() {
   useEffect(() => {
     fetchAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [category, loc, size]);
+  }, [category, loc, size, flaggedOnly]);
 
   useEffect(() => {
     const t = setTimeout(() => fetchAll(), 300);
@@ -90,11 +102,11 @@ export default function Inventory() {
   const handleSaved = () => { setDialogOpen(false); fetchAll(); };
 
   const filterCount = useMemo(() => {
-    return (q ? 1 : 0) + (category !== ALL ? 1 : 0) + (loc !== ALL ? 1 : 0) + (size !== ALL ? 1 : 0);
-  }, [q, category, loc, size]);
+    return (q ? 1 : 0) + (category !== ALL ? 1 : 0) + (loc !== ALL ? 1 : 0) + (size !== ALL ? 1 : 0) + (flaggedOnly ? 1 : 0);
+  }, [q, category, loc, size, flaggedOnly]);
 
   const clearFilters = () => {
-    setQ(""); setCategory(ALL); setLoc(ALL); setSize(ALL);
+    setQ(""); setCategory(ALL); setLoc(ALL); setSize(ALL); setFlaggedOnly(false);
   };
 
   return (
@@ -133,7 +145,7 @@ export default function Inventory() {
       </div>
 
       {/* Filter bar */}
-      <div className="border border-[#E4E4E7] p-4 md:p-5">
+      <div className="border border-[#E4E4E7] p-4 md:p-5 space-y-3">
         <div className="grid md:grid-cols-12 gap-3">
           <div className="md:col-span-5 relative">
             <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#71717A]" />
@@ -185,15 +197,26 @@ export default function Inventory() {
             </Select>
           </div>
         </div>
-        {filterCount > 0 && (
+        <div className="flex items-center justify-between flex-wrap gap-2">
           <button
-            data-testid="clear-filters-btn"
-            onClick={clearFilters}
-            className="mt-3 inline-flex items-center gap-1 text-xs text-[#71717A] hover:text-[#09090B]"
+            type="button"
+            data-testid="filter-flagged-btn"
+            onClick={() => setFlaggedOnly(!flaggedOnly)}
+            className={`inline-flex items-center gap-1.5 text-xs px-3 py-1.5 border ${flaggedOnly ? "bg-[#EF4444] text-white border-[#EF4444]" : "bg-white text-[#09090B] border-[#E4E4E7]"}`}
           >
-            <X className="h-3 w-3" /> Clear {filterCount} filter{filterCount > 1 ? "s" : ""}
+            <Flag className="h-3 w-3" fill={flaggedOnly ? "currentColor" : "none"} />
+            Flagged only
           </button>
-        )}
+          {filterCount > 0 && (
+            <button
+              data-testid="clear-filters-btn"
+              onClick={clearFilters}
+              className="inline-flex items-center gap-1 text-xs text-[#71717A] hover:text-[#09090B]"
+            >
+              <X className="h-3 w-3" /> Clear {filterCount} filter{filterCount > 1 ? "s" : ""}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Results */}
@@ -233,10 +256,11 @@ export default function Inventory() {
 }
 
 function CostumeCard({ costume, onEdit, onDelete }) {
+  const anySizeNote = SIZES.some((s) => (costume.size_notes?.[s] || "").trim());
   return (
     <div className="bg-white p-5 group hover:bg-[#FAFAFA] transition-colors flex flex-col" data-testid={`costume-card-${costume.id}`}>
       <Link to={`/costume/${costume.id}`} className="block">
-        <div className="aspect-[4/5] image-empty overflow-hidden mb-4">
+        <div className="aspect-[4/5] image-empty overflow-hidden mb-4 relative">
           {costume.image_id ? (
             <img
               src={`${process.env.REACT_APP_BACKEND_URL}/api/images/${costume.image_id}`}
@@ -244,6 +268,12 @@ function CostumeCard({ costume, onEdit, onDelete }) {
               className="w-full h-full object-cover"
             />
           ) : null}
+          {costume.is_flagged && (
+            <div className="absolute top-2 right-2 bg-[#EF4444] text-white px-2 py-1 flex items-center gap-1" data-testid={`flag-badge-${costume.id}`}>
+              <Flag className="h-3 w-3" fill="currentColor" />
+              <span className="text-[10px] font-mono-label">FLAGGED</span>
+            </div>
+          )}
         </div>
       </Link>
       <div className="flex items-start justify-between gap-2">
@@ -256,7 +286,9 @@ function CostumeCard({ costume, onEdit, onDelete }) {
           </Link>
           <div className="flex items-center text-xs text-[#71717A] mt-1.5 gap-1">
             <MapPin className="h-3 w-3 shrink-0" />
-            <span className="truncate">{costume.location}</span>
+            <span className="truncate">
+              {costume.location}{costume.sub_location ? ` · ${costume.sub_location}` : ""}
+            </span>
           </div>
         </div>
         <div className="text-right shrink-0">
@@ -266,15 +298,22 @@ function CostumeCard({ costume, onEdit, onDelete }) {
       </div>
       <div className="flex gap-1 mt-4 flex-wrap">
         {SIZES.map((s) => {
-          const q = costume.sizes?.[s] || 0;
+          const qty = costume.sizes?.[s] || 0;
+          const hasNote = (costume.size_notes?.[s] || "").trim().length > 0;
           return (
-            <Badge key={s} variant="outline" className={`rounded-none border ${q > 0 ? "border-[#09090B] text-[#09090B]" : "border-[#E4E4E7] text-[#A1A1AA]"}`}>
+            <Badge key={s} variant="outline" className={`rounded-none border ${qty > 0 ? "border-[#09090B] text-[#09090B]" : "border-[#E4E4E7] text-[#A1A1AA]"}`}>
               <span className="font-mono-label text-[10px]">{s}</span>
-              <span className="tabular-nums text-[10px] ml-1">{q}</span>
+              <span className="tabular-nums text-[10px] ml-1">{qty}</span>
+              {hasNote && <StickyNote className="h-2.5 w-2.5 ml-0.5" />}
             </Badge>
           );
         })}
       </div>
+      {anySizeNote && (
+        <div className="text-[10px] font-mono-label text-[#71717A] mt-2 flex items-center gap-1">
+          <StickyNote className="h-3 w-3" /> HAS SIZE NOTES
+        </div>
+      )}
       <div className="flex gap-2 mt-4 pt-4 border-t border-[#E4E4E7]">
         <button
           data-testid={`edit-${costume.id}`}
@@ -321,10 +360,15 @@ function CostumeTable({ costumes, onEdit, onDelete }) {
           {costumes.map((c) => (
             <tr key={c.id} className="border-b border-[#E4E4E7] hover:bg-[#FAFAFA]" data-testid={`row-${c.id}`}>
               <td className="px-4 py-3">
-                <Link to={`/costume/${c.id}`} className="font-medium text-[#09090B] hover:underline">{c.name}</Link>
+                <div className="flex items-center gap-2">
+                  {c.is_flagged && <Flag className="h-3 w-3 text-[#EF4444] shrink-0" fill="currentColor" />}
+                  <Link to={`/costume/${c.id}`} className="font-medium text-[#09090B] hover:underline truncate">{c.name}</Link>
+                </div>
               </td>
               <td className="px-4 py-3 text-[#52525B]">{c.category}</td>
-              <td className="px-4 py-3 text-[#52525B]">{c.location}</td>
+              <td className="px-4 py-3 text-[#52525B]">
+                {c.location}{c.sub_location ? ` · ${c.sub_location}` : ""}
+              </td>
               {SIZES.map((s) => (
                 <td key={s} className="px-2 py-3 text-center tabular-nums">{c.sizes?.[s] || 0}</td>
               ))}

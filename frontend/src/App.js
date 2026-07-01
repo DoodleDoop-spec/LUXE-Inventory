@@ -6,6 +6,7 @@ import Dashboard from "@/pages/Dashboard";
 import Inventory from "@/pages/Inventory";
 import CostumeDetail from "@/pages/CostumeDetail";
 import Locations from "@/pages/Locations";
+import Settings from "@/pages/Settings";
 
 function App() {
   return (
@@ -17,6 +18,7 @@ function App() {
             <Route path="/inventory" element={<Inventory />} />
             <Route path="/costume/:id" element={<CostumeDetail />} />
             <Route path="/locations" element={<Locations />} />
+            <Route path="/settings" element={<Settings />} />
           </Route>
         </Routes>
       </BrowserRouter>

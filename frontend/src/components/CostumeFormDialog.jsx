@@ -10,11 +10,13 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
-import { Upload, Image as ImageIcon, X } from "lucide-react";
+import { Upload, Image as ImageIcon, X, StickyNote, Flag } from "lucide-react";
 
-const SIZES = ["XS", "S", "M", "L", "XL"];
-const CUSTOM_LOC = "__custom__";
+const SIZES = ["XS", "S", "M", "L", "XL", "XXL", "XXXL"];
+const emptySizes = () => Object.fromEntries(SIZES.map((s) => [s, 0]));
+const emptySizeNotes = () => Object.fromEntries(SIZES.map((s) => [s, ""]));
 
 export default function CostumeFormDialog({ open, onOpenChange, editing, categories, locations, onSaved }) {
   const [name, setName] = useState("");
@@ -22,12 +24,17 @@ export default function CostumeFormDialog({ open, onOpenChange, editing, categor
   const [newCategory, setNewCategory] = useState("");
   const [locMode, setLocMode] = useState("preset");
   const [presetLocation, setPresetLocation] = useState("");
+  const [subLocation, setSubLocation] = useState("");
   const [customLocation, setCustomLocation] = useState("");
   const [notes, setNotes] = useState("");
-  const [sizes, setSizes] = useState(Object.fromEntries(SIZES.map((s) => [s, 0])));
+  const [sizes, setSizes] = useState(emptySizes());
+  const [sizeNotes, setSizeNotes] = useState(emptySizeNotes());
+  const [openSizeNote, setOpenSizeNote] = useState(null);
   const [imageId, setImageId] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [isFlagged, setIsFlagged] = useState(false);
+  const [flagReason, setFlagReason] = useState("");
   const fileRef = useRef(null);
 
   useEffect(() => {
@@ -46,16 +53,24 @@ export default function CostumeFormDialog({ open, onOpenChange, editing, categor
         setPresetLocation("");
         setCustomLocation(editing.location || "");
       }
+      setSubLocation(editing.sub_location || "");
       setNotes(editing.notes || "");
-      setSizes({ ...Object.fromEntries(SIZES.map((s) => [s, 0])), ...(editing.sizes || {}) });
+      setSizes({ ...emptySizes(), ...(editing.sizes || {}) });
+      setSizeNotes({ ...emptySizeNotes(), ...(editing.size_notes || {}) });
       setImageId(editing.image_id || null);
+      setIsFlagged(!!editing.is_flagged);
+      setFlagReason(editing.flag_reason || "");
     } else {
       setName(""); setCategory(""); setNewCategory("");
-      setLocMode("preset"); setPresetLocation(""); setCustomLocation("");
+      setLocMode("preset"); setPresetLocation(""); setSubLocation(""); setCustomLocation("");
       setNotes("");
-      setSizes(Object.fromEntries(SIZES.map((s) => [s, 0])));
+      setSizes(emptySizes());
+      setSizeNotes(emptySizeNotes());
       setImageId(null);
+      setIsFlagged(false);
+      setFlagReason("");
     }
+    setOpenSizeNote(null);
   }, [open, editing, locations]);
 
   const total = SIZES.reduce((acc, s) => acc + (Number(sizes[s]) || 0), 0);
@@ -88,20 +103,24 @@ export default function CostumeFormDialog({ open, onOpenChange, editing, categor
     if (!name.trim()) { toast.error("Name is required"); return; }
     if (!finalCategory) { toast.error("Category is required"); return; }
     if (!finalLocation) { toast.error("Location is required"); return; }
+    if (isFlagged && !flagReason.trim()) { toast.error("Flag reason is required"); return; }
 
     setSaving(true);
     try {
-      // If new category, create it first
       if (category === "__new__" && newCategory.trim()) {
-        try { await api.post("/categories", { name: newCategory.trim() }); } catch (err) { /* category may already exist */ }
+        try { await api.post("/categories", { name: newCategory.trim() }); } catch (err) { /* may already exist */ }
       }
       const payload = {
         name: name.trim(),
         category: finalCategory,
         location: finalLocation,
+        sub_location: locMode === "preset" ? subLocation.trim() : "",
         notes: notes.trim(),
         sizes: Object.fromEntries(SIZES.map((s) => [s, Number(sizes[s]) || 0])),
+        size_notes: Object.fromEntries(SIZES.map((s) => [s, (sizeNotes[s] || "").trim()])),
         image_id: imageId,
+        is_flagged: isFlagged,
+        flag_reason: isFlagged ? flagReason.trim() : "",
       };
       if (editing) {
         await api.put(`/costumes/${editing.id}`, payload);
@@ -191,16 +210,25 @@ export default function CostumeFormDialog({ open, onOpenChange, editing, categor
               </button>
             </div>
             {locMode === "preset" ? (
-              <Select value={presetLocation} onValueChange={setPresetLocation}>
-                <SelectTrigger data-testid="form-location-preset" className="rounded-none border-[#E4E4E7] h-11">
-                  <SelectValue placeholder="Select a location" />
-                </SelectTrigger>
-                <SelectContent>
-                  {locations.map((l) => (
-                    <SelectItem key={l.id} value={l.name}>{l.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="grid md:grid-cols-2 gap-3">
+                <Select value={presetLocation} onValueChange={setPresetLocation}>
+                  <SelectTrigger data-testid="form-location-preset" className="rounded-none border-[#E4E4E7] h-11">
+                    <SelectValue placeholder="Select a location" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {locations.map((l) => (
+                      <SelectItem key={l.id} value={l.name}>{l.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Input
+                  data-testid="form-sub-location"
+                  value={subLocation}
+                  onChange={(e) => setSubLocation(e.target.value)}
+                  placeholder="Sub-location (optional) — e.g. B2, Shelf 3"
+                  className="rounded-none border-[#E4E4E7] h-11"
+                />
+              </div>
             ) : (
               <Input
                 data-testid="form-location-custom"
@@ -209,6 +237,9 @@ export default function CostumeFormDialog({ open, onOpenChange, editing, categor
                 placeholder="e.g. Storage Room A, Shelf 3"
                 className="rounded-none border-[#E4E4E7] h-11"
               />
+            )}
+            {locMode === "preset" && subLocation.trim() && presetLocation && (
+              <p className="text-xs text-[#71717A]">Will be stored as: <span className="text-[#09090B] font-medium">{presetLocation} · {subLocation.trim()}</span></p>
             )}
           </div>
 
@@ -220,21 +251,82 @@ export default function CostumeFormDialog({ open, onOpenChange, editing, categor
                 Total: <span className="font-semibold text-[#09090B] tabular-nums" data-testid="form-total">{total}</span>
               </div>
             </div>
-            <div className="grid grid-cols-5 gap-px bg-[#E4E4E7] border border-[#E4E4E7]">
-              {SIZES.map((s) => (
-                <div key={s} className="bg-white p-3">
-                  <div className="font-mono-label text-[10px] text-[#71717A] text-center mb-1">{s}</div>
-                  <Input
-                    data-testid={`form-size-${s}`}
-                    type="number"
-                    min="0"
-                    value={sizes[s]}
-                    onChange={(e) => setSizes({ ...sizes, [s]: Math.max(0, Number(e.target.value) || 0) })}
-                    className="rounded-none border-[#E4E4E7] h-10 text-center tabular-nums"
-                  />
-                </div>
-              ))}
+            <div className="grid grid-cols-4 sm:grid-cols-7 gap-px bg-[#E4E4E7] border border-[#E4E4E7]">
+              {SIZES.map((s) => {
+                const hasNote = (sizeNotes[s] || "").trim().length > 0;
+                return (
+                  <div key={s} className="bg-white p-3 relative">
+                    <div className="font-mono-label text-[10px] text-[#71717A] text-center mb-1">{s}</div>
+                    <Input
+                      data-testid={`form-size-${s}`}
+                      type="number"
+                      min="0"
+                      value={sizes[s]}
+                      onChange={(e) => setSizes({ ...sizes, [s]: Math.max(0, Number(e.target.value) || 0) })}
+                      className="rounded-none border-[#E4E4E7] h-10 text-center tabular-nums"
+                    />
+                    <button
+                      type="button"
+                      data-testid={`form-size-note-btn-${s}`}
+                      onClick={() => setOpenSizeNote(openSizeNote === s ? null : s)}
+                      className={`mt-1.5 w-full text-[10px] flex items-center justify-center gap-1 py-1 border ${hasNote ? "border-[#09090B] text-[#09090B] bg-[#F4F4F5]" : "border-[#E4E4E7] text-[#71717A]"} hover:border-[#09090B]`}
+                    >
+                      <StickyNote className="h-3 w-3" />
+                      {hasNote ? "Note" : "+ Note"}
+                    </button>
+                  </div>
+                );
+              })}
             </div>
+            {openSizeNote && (
+              <div className="border border-[#09090B] p-3 bg-[#FAFAFA]" data-testid={`size-note-panel-${openSizeNote}`}>
+                <div className="flex items-center justify-between mb-2">
+                  <Label className="eyebrow">NOTE FOR SIZE {openSizeNote}</Label>
+                  <button
+                    type="button"
+                    onClick={() => setOpenSizeNote(null)}
+                    className="text-[#71717A] hover:text-[#09090B]"
+                    aria-label="Close"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <Textarea
+                  data-testid={`form-size-note-${openSizeNote}`}
+                  value={sizeNotes[openSizeNote] || ""}
+                  onChange={(e) => setSizeNotes({ ...sizeNotes, [openSizeNote]: e.target.value })}
+                  placeholder={`e.g. Two of the size ${openSizeNote} have loose buttons`}
+                  rows={2}
+                  className="rounded-none border-[#E4E4E7]"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Flag */}
+          <div className="border border-[#E4E4E7] p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Flag className={`h-4 w-4 ${isFlagged ? "text-[#EF4444]" : "text-[#71717A]"}`} fill={isFlagged ? "currentColor" : "none"} />
+                <Label className="eyebrow">FLAG THIS COSTUME</Label>
+              </div>
+              <Switch
+                data-testid="form-flag-switch"
+                checked={isFlagged}
+                onCheckedChange={setIsFlagged}
+              />
+            </div>
+            {isFlagged && (
+              <Textarea
+                data-testid="form-flag-reason"
+                value={flagReason}
+                onChange={(e) => setFlagReason(e.target.value)}
+                placeholder="Reason (e.g. Loaned to Company X until 15 April)"
+                rows={2}
+                required
+                className="rounded-none border-[#E4E4E7]"
+              />
+            )}
           </div>
 
           {/* Image upload */}
@@ -278,7 +370,7 @@ export default function CostumeFormDialog({ open, onOpenChange, editing, categor
           </div>
 
           <div className="space-y-2">
-            <Label className="eyebrow">NOTES</Label>
+            <Label className="eyebrow">GENERAL NOTES</Label>
             <Textarea
               data-testid="form-notes"
               value={notes}
