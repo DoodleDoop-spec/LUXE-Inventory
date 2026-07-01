@@ -52,9 +52,19 @@ without the need for coding experience.
   - **Subcategories per category**: `GET /api/categories` returns `subcategories[]`; `POST/DELETE /api/categories/{id}/subcategories`; Settings has expandable rows to manage.
   - Inventory: filter by subcategory and sizing system; new sort dropdown.
 
+- **Iteration 4**:
+  - **Hierarchical locations** (unlimited depth) via `parent_id`. New endpoints: `PUT /api/locations/{id}` rename, DELETE 409 if it has children. Locations page + Settings use a shared `LocationTree` component (inline + / rename / delete + expandable rows with per-location costumes).
+  - **Shows** collection with year: `GET/POST/PUT/DELETE /api/shows`. Managed in Settings. Costume gets `creator`, `original_show_id`, `additional_show_ids`, and denormalized `origin_year`. Editing a show's year re-syncs origin_year on all costumes using it.
+  - **Removed** `last_year_used`. New default sort = `origin_year_asc` (nulls last); options: `origin_year_desc`, `updated_desc`, `name_asc`, `total_desc`, `system_size`.
+  - Inventory filters + sort collapsed by default (toggle-filters-btn / toggle-sort-btn); **removed** size + sizing_system filters.
+  - List view: image thumbnail column left of name (with placeholder icon when no image).
+  - Search bar X-clear (global + local).
+  - **LUXE logo** in header (`/assets/logo.webp`), Dashboard hero: "LUXE Inventory Management System".
+
 ## Status
-- Backend: 31/31 pytest cases pass
-- Frontend: All spec'd flows and testids verified via Playwright
+- Backend: 16/16 pytest cases pass (iteration 4)
+- Frontend: All spec'd testids verified via Playwright
+- Minor cosmetic fixes applied: dashboard empty-tile hidden when < 4 recent; list-view thumbnail shows placeholder icon.
 
 ## Backlog (Next)
 - P1: Bulk import (CSV) / export costumes

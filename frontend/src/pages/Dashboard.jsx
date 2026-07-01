@@ -128,7 +128,7 @@ export default function Dashboard() {
             </Link>
           </div>
         ) : (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-px bg-[#E4E4E7] border border-[#E4E4E7]">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-px bg-[#E4E4E7] border border-[#E4E4E7]" style={{ gridTemplateColumns: recent.length < 4 ? `repeat(${Math.max(recent.length, 1)}, minmax(0, 1fr))` : undefined }}>
             {recent.map((c) => (
               <Link
                 key={c.id}

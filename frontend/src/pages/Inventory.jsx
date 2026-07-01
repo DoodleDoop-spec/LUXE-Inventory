@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { api } from "@/lib/api";
-import { Plus, Search, LayoutGrid, List, X, MapPin, ChevronRight, Flag, StickyNote, SlidersHorizontal, ArrowUpDown, Calendar } from "lucide-react";
+import { Plus, Search, LayoutGrid, List, X, MapPin, ChevronRight, Flag, StickyNote, SlidersHorizontal, ArrowUpDown, Calendar, Image as ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -483,13 +483,15 @@ function CostumeTable({ costumes, onEdit, onDelete, showsById }) {
             return (
               <tr key={c.id} className="border-b border-[#E4E4E7] hover:bg-[#FAFAFA]" data-testid={`row-${c.id}`}>
                 <td className="px-2 py-2">
-                  <Link to={`/costume/${c.id}`} className="block w-12 h-12 image-empty overflow-hidden border border-[#E4E4E7]" data-testid={`row-thumb-${c.id}`}>
-                    {c.image_id && (
+                  <Link to={`/costume/${c.id}`} className="block w-12 h-12 image-empty overflow-hidden border border-[#E4E4E7] flex items-center justify-center" data-testid={`row-thumb-${c.id}`}>
+                    {c.image_id ? (
                       <img
                         src={`${process.env.REACT_APP_BACKEND_URL}/api/images/${c.image_id}`}
                         alt={c.name}
                         className="w-full h-full object-cover"
                       />
+                    ) : (
+                      <ImageIcon className="h-4 w-4 text-[#A1A1AA]" />
                     )}
                   </Link>
                 </td>
