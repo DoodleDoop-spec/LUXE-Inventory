@@ -49,7 +49,7 @@ export default function Shows() {
   return (
     <div className="space-y-10" data-testid="shows-page">
       <div className="space-y-2">
-        <div className="eyebrow">INDEX 05 / SHOWS</div>
+        <div className="eyebrow">SHOWS</div>
         <h1 className="font-display text-4xl sm:text-5xl tracking-tight font-bold text-[#09090B]">
           Shows
         </h1>
@@ -80,13 +80,13 @@ export default function Shows() {
                   <span className="text-xs text-[#71717A]">{ys.length} show{ys.length === 1 ? "" : "s"}</span>
                 </button>
                 {isOpen && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-px bg-[#E4E4E7] border border-[#E4E4E7]">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                     {ys.map((s) => (
                       <Link
                         key={s.id}
                         to={`/shows/${s.id}`}
                         data-testid={`show-card-${s.id}`}
-                        className="bg-white p-5 hover:bg-[#FAFAFA] transition-colors"
+                        className="bg-white border border-[#E4E4E7] p-5 hover:border-[#09090B] transition-colors"
                       >
                         <div className="aspect-video image-empty overflow-hidden mb-4 relative">
                           {s.image_id ? (

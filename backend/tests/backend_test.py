@@ -1,13 +1,18 @@
-"""Backend pytest tests for Costume Inventory Tracker — Iteration 5."""
+"""Backend pytest tests for Costume Inventory Tracker — Iteration 6."""
 import os
 import uuid
 import pytest
 import requests
+from datetime import datetime, timezone
 from dotenv import load_dotenv
+from pymongo import MongoClient
 
 load_dotenv("/app/frontend/.env")
+load_dotenv("/app/backend/.env")
 BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 API = f"{BASE_URL}/api"
+MONGO_URL = os.environ["MONGO_URL"]
+DB_NAME = os.environ["DB_NAME"]
 
 
 @pytest.fixture(scope="session")
@@ -320,3 +325,162 @@ def test_settings_default_view(session):
     r = session.get(f"{API}/settings")
     assert r.status_code == 200
     assert "default_view" in r.json()
+
+# ==============================================================
+# Iteration 6 — BUG#1: legacy string subcategories bug fix
+# ==============================================================
+@pytest.fixture
+def mongo_db():
+    client = MongoClient(MONGO_URL)
+    db = client[DB_NAME]
+    yield db
+    client.close()
+
+
+def test_bug1_legacy_string_subcategories_nested_add(session, mongo_db):
+    """BUG#1 repro: insert category with legacy string subcategories directly in DB.
+    GET should normalize+persist; subsequent POST with parent_id should succeed."""
+    cat_id = "test-cat-legacy-bug1"
+    # Clean any leftover
+    mongo_db.categories.delete_one({"id": cat_id})
+    mongo_db.categories.insert_one({
+        "id": cat_id,
+        "name": "TEST_LEGACY_BUG1",
+        "subcategories": ["LegacyA", "LegacyB"],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    try:
+        # First GET → normalizes and persists
+        r = session.get(f"{API}/categories")
+        assert r.status_code == 200
+        cat = next((c for c in r.json() if c["id"] == cat_id), None)
+        assert cat is not None
+        subs1 = cat["subcategories"]
+        assert len(subs1) == 2
+        for s in subs1:
+            assert isinstance(s, dict)
+            assert "id" in s and "name" in s
+            assert s["parent_id"] is None
+        legacy_a = next(s for s in subs1 if s["name"] == "LegacyA")
+        legacy_a_id = legacy_a["id"]
+
+        # Verify persistence in DB (not fresh UUIDs)
+        db_doc = mongo_db.categories.find_one({"id": cat_id})
+        db_subs = db_doc["subcategories"]
+        assert all(isinstance(s, dict) for s in db_subs)
+        db_ids = {s["id"] for s in db_subs}
+        assert legacy_a_id in db_ids, "Normalized subcategory IDs not persisted"
+
+        # Second GET → same IDs (stable)
+        r2 = session.get(f"{API}/categories")
+        cat2 = next(c for c in r2.json() if c["id"] == cat_id)
+        subs2 = cat2["subcategories"]
+        legacy_a2 = next(s for s in subs2 if s["name"] == "LegacyA")
+        assert legacy_a2["id"] == legacy_a_id, "IDs changed between GETs"
+
+        # Now POST a child under LegacyA using its id
+        r3 = session.post(f"{API}/categories/{cat_id}/subcategories",
+                          json={"name": "Child", "parent_id": legacy_a_id})
+        assert r3.status_code == 200, f"BUG#1 not fixed: {r3.status_code} {r3.text}"
+        result_subs = r3.json()["subcategories"]
+        child = next((s for s in result_subs if s["name"] == "Child"), None)
+        assert child is not None
+        assert child["parent_id"] == legacy_a_id
+
+        # Third GET → parent_id chain preserved
+        r4 = session.get(f"{API}/categories")
+        cat4 = next(c for c in r4.json() if c["id"] == cat_id)
+        subs4 = cat4["subcategories"]
+        by_id = {s["id"]: s for s in subs4}
+        assert child["id"] in by_id
+        assert by_id[child["id"]]["parent_id"] == legacy_a_id
+        assert by_id[legacy_a_id]["parent_id"] is None
+    finally:
+        mongo_db.categories.delete_one({"id": cat_id})
+
+
+def test_stable_ids_across_repeated_gets(session, temp_category):
+    """Repeated GETs return stable IDs (no fresh UUIDs)."""
+    cid = temp_category["id"]
+    session.post(f"{API}/categories/{cid}/subcategories", json={"name": "SA"})
+    session.post(f"{API}/categories/{cid}/subcategories", json={"name": "SB"})
+    ids_snapshots = []
+    for _ in range(3):
+        r = session.get(f"{API}/categories")
+        cat = next(c for c in r.json() if c["id"] == cid)
+        ids_snapshots.append({s["name"]: s["id"] for s in cat["subcategories"]})
+    assert ids_snapshots[0] == ids_snapshots[1] == ids_snapshots[2], f"IDs unstable: {ids_snapshots}"
+
+
+def test_iter6_nested_3_deep_root_a_1(session, temp_category):
+    """3-deep nesting: Root -> A -> 1 all succeed with parent_id resolving."""
+    cid = temp_category["id"]
+    r = session.post(f"{API}/categories/{cid}/subcategories", json={"name": "Root"})
+    assert r.status_code == 200
+    root = next(s for s in r.json()["subcategories"] if s["name"] == "Root")
+
+    r = session.post(f"{API}/categories/{cid}/subcategories",
+                     json={"name": "A", "parent_id": root["id"]})
+    assert r.status_code == 200
+    a = next(s for s in r.json()["subcategories"] if s["name"] == "A" and s["parent_id"] == root["id"])
+
+    r = session.post(f"{API}/categories/{cid}/subcategories",
+                     json={"name": "1", "parent_id": a["id"]})
+    assert r.status_code == 200
+    one = next(s for s in r.json()["subcategories"] if s["name"] == "1" and s["parent_id"] == a["id"])
+    assert one["parent_id"] == a["id"]
+
+
+# ==============================================================
+# Iteration 6 — Default costume sort = origin_year_desc (nulls last)
+# ==============================================================
+def test_costumes_default_sort_is_origin_year_desc(session):
+    """GET /api/costumes with no sort → same as sort=origin_year_desc (nulls last)."""
+    shows = []
+    costumes = []
+    try:
+        # Create shows with distinct years
+        s_old = session.post(f"{API}/shows", json={"name": f"TEST_OLD_{uuid.uuid4().hex[:6]}", "year": 1985}).json()
+        s_new = session.post(f"{API}/shows", json={"name": f"TEST_NEW_{uuid.uuid4().hex[:6]}", "year": 2024}).json()
+        shows = [s_old, s_new]
+
+        c_old = session.post(f"{API}/costumes", json={
+            "name": f"TEST_SORT_OLD_{uuid.uuid4().hex[:6]}", "category": "Modern",
+            "location": "Main Wardrobe", "original_show_id": s_old["id"], "sizes": {"S": 1},
+        }).json()
+        c_new = session.post(f"{API}/costumes", json={
+            "name": f"TEST_SORT_NEW_{uuid.uuid4().hex[:6]}", "category": "Modern",
+            "location": "Main Wardrobe", "original_show_id": s_new["id"], "sizes": {"S": 1},
+        }).json()
+        c_null = session.post(f"{API}/costumes", json={
+            "name": f"TEST_SORT_NULL_{uuid.uuid4().hex[:6]}", "category": "Modern",
+            "location": "Main Wardrobe", "sizes": {"S": 1},
+        }).json()
+        costumes = [c_old, c_new, c_null]
+        my_ids = {c["id"] for c in costumes}
+
+        # Default (no sort param)
+        r = session.get(f"{API}/costumes")
+        assert r.status_code == 200
+        all_default = r.json()
+        mine_default = [c for c in all_default if c["id"] in my_ids]
+        # Should be ordered: c_new (2024), c_old (1985), c_null (null last)
+        assert [c["id"] for c in mine_default] == [c_new["id"], c_old["id"], c_null["id"]], \
+            f"Default sort not origin_year_desc: {[(c['name'], c.get('origin_year')) for c in mine_default]}"
+
+        # Explicit sort=origin_year_desc → same
+        r = session.get(f"{API}/costumes", params={"sort": "origin_year_desc"})
+        mine_desc = [c for c in r.json() if c["id"] in my_ids]
+        assert [c["id"] for c in mine_desc] == [c_new["id"], c_old["id"], c_null["id"]]
+
+        # sort=origin_year_asc → ascending, nulls last: c_old, c_new, c_null
+        r = session.get(f"{API}/costumes", params={"sort": "origin_year_asc"})
+        mine_asc = [c for c in r.json() if c["id"] in my_ids]
+        assert [c["id"] for c in mine_asc] == [c_old["id"], c_new["id"], c_null["id"]], \
+            f"origin_year_asc order wrong: {[(c['name'], c.get('origin_year')) for c in mine_asc]}"
+    finally:
+        for c in costumes:
+            session.delete(f"{API}/costumes/{c['id']}")
+        for s in shows:
+            session.delete(f"{API}/shows/{s['id']}")
+

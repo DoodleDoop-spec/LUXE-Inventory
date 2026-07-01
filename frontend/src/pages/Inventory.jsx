@@ -12,7 +12,7 @@ import CostumeFormDialog from "@/components/CostumeFormDialog";
 import { toast } from "sonner";
 
 const ALL = "__all__";
-const DEFAULT_SORT = "origin_year_asc";
+const DEFAULT_SORT = "origin_year_desc";
 
 // Given a flat list of {id, name, parent_id} nodes, return list of {id, path} in tree order.
 function subcategoryPathOptions(subs) {
@@ -162,8 +162,8 @@ export default function Inventory() {
   const clearSearch = () => setQ("");
 
   const sortLabel = {
-    origin_year_asc: "Origin year ↑ (oldest first)",
-    origin_year_desc: "Origin year ↓ (newest first)",
+    origin_year_desc: "Most recently used",
+    origin_year_asc: "Oldest first",
     updated_desc: "Recently updated",
     name_asc: "Name A → Z",
     total_desc: "Total qty ↓",
@@ -173,9 +173,9 @@ export default function Inventory() {
     <div className="space-y-8" data-testid="inventory-page">
       <div className="flex items-end justify-between flex-wrap gap-4">
         <div className="space-y-2">
-          <div className="eyebrow">INDEX 02 / INVENTORY</div>
+          <div className="eyebrow">INVENTORY</div>
           <h1 className="font-display text-4xl sm:text-5xl tracking-tight font-bold text-[#09090B]">
-            All Costumes
+            All Inventory
           </h1>
           <p className="text-sm text-[#71717A]">{costumes.length} {costumes.length === 1 ? "item" : "items"} found</p>
         </div>
@@ -346,8 +346,8 @@ export default function Inventory() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="origin_year_asc">Origin year ↑ (oldest first)</SelectItem>
-                <SelectItem value="origin_year_desc">Origin year ↓ (newest first)</SelectItem>
+                <SelectItem value="origin_year_desc">Most recently used</SelectItem>
+                <SelectItem value="origin_year_asc">Oldest first</SelectItem>
                 <SelectItem value="updated_desc">Recently updated</SelectItem>
                 <SelectItem value="name_asc">Name A → Z</SelectItem>
                 <SelectItem value="total_desc">Total qty ↓</SelectItem>

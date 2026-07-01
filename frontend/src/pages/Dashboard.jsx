@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
-import { Boxes, Shirt, Tag, ArrowUpRight, Plus, Flag } from "lucide-react";
+import { Boxes, Package, Tag, ArrowUpRight, Plus, Flag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function Dashboard() {
@@ -14,7 +14,7 @@ export default function Dashboard() {
       try {
         const [s, r, f] = await Promise.all([
           api.get("/stats"),
-          api.get("/costumes", { params: { sort: "updated_desc" } }),
+          api.get("/costumes", { params: { sort: "origin_year_desc" } }),
           api.get("/flagged"),
         ]);
         setStats(s.data);
@@ -25,7 +25,7 @@ export default function Dashboard() {
   }, []);
 
   const tiles = [
-    { label: "Total Costumes", value: stats?.total_costumes ?? "—", icon: Shirt, testId: "stat-total-costumes" },
+    { label: "Total Costumes", value: stats?.total_costumes ?? "—", icon: Package, testId: "stat-total-costumes" },
     { label: "Total Items", value: stats?.total_items ?? "—", icon: Boxes, testId: "stat-total-items" },
     { label: "Categories", value: stats?.category_count ?? "—", icon: Tag, testId: "stat-categories" },
     { label: "Flagged", value: stats?.flagged_count ?? 0, icon: Flag, testId: "stat-flagged" },
@@ -35,7 +35,7 @@ export default function Dashboard() {
     <div className="space-y-12" data-testid="dashboard-page">
       <section className="grid md:grid-cols-12 gap-6 items-end">
         <div className="md:col-span-8 space-y-4">
-          <div className="eyebrow">OVERVIEW / INDEX 01</div>
+          <div className="eyebrow">OVERVIEW</div>
           <h1 className="font-display text-4xl sm:text-5xl lg:text-6xl tracking-tight font-bold text-[#09090B] leading-[1.05]" data-testid="dashboard-title">
             LUXE Inventory Management System
           </h1>
@@ -109,9 +109,9 @@ export default function Dashboard() {
       <section className="space-y-6">
         <div className="flex items-end justify-between">
           <div>
-            <div className="eyebrow">RECENT / UPDATED</div>
+            <div className="eyebrow">MOST RECENTLY USED</div>
             <h2 className="font-display text-2xl sm:text-3xl tracking-tight font-semibold text-[#09090B] mt-2">
-              Recently updated
+              Most recently used
             </h2>
           </div>
           <Link to="/inventory" className="text-sm font-medium text-[#09090B] hover:underline" data-testid="link-view-all">

@@ -1,10 +1,10 @@
 import { Outlet, NavLink, Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
-import { LayoutDashboard, Shirt, MapPin, Settings as SettingsIcon, Search, X, Film } from "lucide-react";
+import { LayoutDashboard, Package, MapPin, Settings as SettingsIcon, Search, X, Film } from "lucide-react";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, testId: "nav-dashboard" },
-  { to: "/inventory", label: "Inventory", icon: Shirt, testId: "nav-inventory" },
+  { to: "/inventory", label: "Inventory", icon: Package, testId: "nav-inventory" },
   { to: "/shows", label: "Shows", icon: Film, testId: "nav-shows" },
   { to: "/locations", label: "Locations", icon: MapPin, testId: "nav-locations" },
   { to: "/settings", label: "Settings", icon: SettingsIcon, testId: "nav-settings" },

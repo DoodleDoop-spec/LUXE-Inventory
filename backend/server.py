@@ -350,7 +350,7 @@ async def list_costumes(
     if flagged is not None:
         query["is_flagged"] = flagged
     # Sorting
-    sort_spec = [("origin_year", 1), ("name", 1)]
+    sort_spec = [("origin_year", -1), ("name", 1)]  # default: most recently used (newest origin year first)
     if sort == "updated_desc":
         sort_spec = [("updated_at", -1)]
     elif sort == "origin_year_asc":
@@ -362,8 +362,11 @@ async def list_costumes(
     elif sort == "total_desc":
         sort_spec = [("total_quantity", -1)]
     docs = await db.costumes.find(query, {"_id": 0}).sort(sort_spec).to_list(2000)
-    if sort in (None, "origin_year_asc"):
+    if sort == "origin_year_asc":
         docs.sort(key=lambda d: (d.get("origin_year") is None, d.get("origin_year") or 0, d.get("name", "").lower()))
+    elif sort in (None, "origin_year_desc"):
+        # newest first; nulls at end
+        docs.sort(key=lambda d: (d.get("origin_year") is None, -(d.get("origin_year") or 0), d.get("name", "").lower()))
     return docs
 
 
@@ -605,12 +608,21 @@ async def delete_location(location_id: str):
 async def list_categories():
     docs = await db.categories.find({}, {"_id": 0}).sort("name", 1).to_list(500)
     for d in docs:
-        d["subcategories"] = _normalize_subcategories(d.get("subcategories"))
+        original = d.get("subcategories")
+        normalized = _normalize_subcategories(original)
+        # Persist normalization once if the stored form was legacy strings
+        needs_migration = any(isinstance(s, str) for s in (original or []))
+        if needs_migration:
+            await db.categories.update_one({"id": d["id"]}, {"$set": {"subcategories": normalized}})
+        d["subcategories"] = normalized
     existing = {d["name"] for d in docs}
     used = await db.costumes.distinct("category")
     for u in used:
         if u and u not in existing:
-            docs.append({"id": str(uuid.uuid4()), "name": u, "subcategories": [], "created_at": _now_iso()})
+            new_id = str(uuid.uuid4())
+            new_doc = {"id": new_id, "name": u, "subcategories": [], "created_at": _now_iso()}
+            await db.categories.insert_one(dict(new_doc))
+            docs.append(new_doc)
             existing.add(u)
     return sorted(docs, key=lambda x: x["name"].lower())
 
@@ -654,6 +666,8 @@ async def add_subcategory(category_id: str, payload: SubcategoryPayload):
     if "/" in name:
         raise HTTPException(status_code=400, detail="Subcategory name cannot contain '/'")
     subs = _normalize_subcategories(doc.get("subcategories"))
+    # Persist normalized shape so IDs are stable across requests
+    await db.categories.update_one({"id": category_id}, {"$set": {"subcategories": subs}})
     parent_id = payload.parent_id
     if parent_id and not any(s["id"] == parent_id for s in subs):
         raise HTTPException(status_code=404, detail="Parent subcategory not found")

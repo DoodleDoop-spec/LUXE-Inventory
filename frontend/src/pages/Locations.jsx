@@ -39,7 +39,7 @@ export default function Locations() {
   return (
     <div className="space-y-8" data-testid="locations-page">
       <div className="space-y-2">
-        <div className="eyebrow">INDEX 03 / LOCATIONS</div>
+        <div className="eyebrow">LOCATIONS</div>
         <h1 className="font-display text-4xl sm:text-5xl tracking-tight font-bold text-[#09090B]">
           Storage Locations
         </h1>

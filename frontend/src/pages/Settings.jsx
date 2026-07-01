@@ -220,7 +220,7 @@ export default function Settings() {
   return (
     <div className="space-y-12" data-testid="settings-page">
       <div className="space-y-2">
-        <div className="eyebrow">INDEX 04 / SETTINGS</div>
+        <div className="eyebrow">SETTINGS</div>
         <h1 className="font-display text-4xl sm:text-5xl tracking-tight font-bold text-[#09090B]">Settings</h1>
         <p className="text-sm text-[#71717A] max-w-2xl">
           Manage locations, categories &amp; subcategories, sizing systems, shows, and preferences.

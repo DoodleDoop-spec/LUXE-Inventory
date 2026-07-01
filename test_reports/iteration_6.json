@@ -1,0 +1,32 @@
+{
+  "summary": "Iteration 6 verification. Backend 17/17 pytest tests PASS (13 iter-5 regression + 4 new iter-6). BUG#1 reproducer passes: inserted category with legacy STRING subcategories directly via MongoClient; first GET normalized & PERSISTED shape (verified in DB); subsequent GETs return STABLE IDs; POST child with parent_id=<legacyA.id> returns 200 (NOT 'Parent subcategory not found'); parent_id chain preserved on subsequent GET. Default costume sort verified: GET /api/costumes with no sort returns identical order to sort=origin_year_desc (newest year first, nulls last). sort=origin_year_asc still ascending nulls-last. 3-deep nested Root→A→1 works. Frontend E2E on preview URL confirms: nav-inventory uses lucide-package svg (not shirt); /inventory title 'All Inventory' (0 occurrences of 'All Costumes'); default sort chip shows 'Most recently used'; sort SelectItems are exactly [Most recently used, Oldest first, Recently updated, Name A → Z, Total qty ↓] — no Origin year longform, no Sizing system; /inventory, /shows, /locations, /settings eyebrows are 'INVENTORY', 'SHOWS', 'LOCATIONS', 'SETTINGS' with NO 'INDEX NN /' prefix anywhere on the app; /shows year-sections (2026, 2025) use gap-6 grid with individual borders (no bg-[#E4E4E7] gap-px grey seam — visually confirmed via screenshot); dashboard has 'Most recently used' section title and uses /api/costumes?sort=origin_year_desc for its listing. Order in live UI: Black Trenchcoat (2026) first, Pirate Cumberbund (null) last — matches origin_year_desc with nulls-last.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py list_categories still auto-synthesizes ghost category docs from distinct costume.category values (lines 618-626). It now persists them (good), but the auto-insert on every read could race under concurrent requests. Consider guarding with a unique index on categories.name or checking DB-side.",
+    "server.py subcategory 'Parent subcategory not found' path (add_subcategory) now persists normalized subs BEFORE validating parent_id (line 670). This is idempotent and safe, but note: if the payload's parent_id is invalid, we've already done a write. Not a bug, just a minor side-effect worth documenting.",
+    "server.py list_costumes: default sort_spec is now [('origin_year', -1),('name', 1)] and Python-side post-sort applies nulls-last for both default and origin_year_desc (lines 353, 367-369). Fine, but the mongo-side sort is redundant — the Python re-sort overrides it. Consider removing mongo sort_spec when sort is None or origin_year_desc.",
+    "server.py update_show still does NOT validate name-year uniqueness on PUT — pre-existing issue from iter-5, unchanged.",
+    "server.py still uses deprecated @app.on_event('startup'/'shutdown') — migrate to lifespan (pre-existing).",
+    "Subcategory rename does NOT propagate to costume.subcategory strings (pre-existing carryover; documented in iter-5)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (added 4 iteration-6 tests: BUG#1 legacy-string-subcategories nested add, stable IDs across repeated GETs, iter-6 3-deep Root/A/1, costumes default sort = origin_year_desc)"
+  ],
+  "success_rate": {"backend": "100% (17/17)", "frontend": "100% of iteration-6 spec verified"},
+  "test_credentials": "N/A (no auth in this app; /app/memory/test_credentials.md not present)",
+  "seed_data_creation": "pytest self-creates/self-cleans TEST_* fixtures. BUG#1 test inserts+deletes 'test-cat-legacy-bug1' via pymongo direct write.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "backend_test.py now has 17 tests (iter-5 + iter-6). Iter-6 key facts: (1) list_categories PERSISTS normalized subcategory objects on first read when it encounters legacy strings — this fixes 'Parent subcategory not found' on nested creation. (2) add_subcategory also persists the normalized shape BEFORE parent_id validation for extra safety. (3) Default costume sort is origin_year_desc (nulls last) — no sort param behaves identically. (4) Frontend: nav Inventory icon = Package (not Shirt); /inventory title = 'All Inventory'; eyebrows are plain labels — no 'INDEX NN /' prefix on any page; /shows year cards use grid gap-6 with individual borders. Preview URL: https://wardrobe-inventory-3.preview.emergentagent.com.",
+  "rca of the issue": "BUG#1 was fixed by persisting normalized subcategory shape on first read of legacy string entries in list_categories (line 615-616) AND inside add_subcategory before parent_id validation (line 670). Verified via pymongo direct-insert repro: legacy strings ['LegacyA','LegacyB'] → after GET, DB now contains [{id,name,parent_id:null},…] with stable UUIDs → POST child with parent_id=legacyA.id returns 200 as expected."
+}
