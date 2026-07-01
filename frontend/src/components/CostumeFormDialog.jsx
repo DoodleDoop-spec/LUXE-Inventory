@@ -268,7 +268,11 @@ export default function CostumeFormDialog({ open, onOpenChange, editing, categor
                     <button
                       type="button"
                       data-testid={`form-size-note-btn-${s}`}
-                      onClick={() => setOpenSizeNote(openSizeNote === s ? null : s)}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setOpenSizeNote((prev) => (prev === s ? null : s));
+                      }}
                       className={`mt-1.5 w-full text-[10px] flex items-center justify-center gap-1 py-1 border ${hasNote ? "border-[#09090B] text-[#09090B] bg-[#F4F4F5]" : "border-[#E4E4E7] text-[#71717A]"} hover:border-[#09090B]`}
                     >
                       <StickyNote className="h-3 w-3" />

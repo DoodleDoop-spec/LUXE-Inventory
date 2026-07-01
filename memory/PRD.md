@@ -32,22 +32,21 @@ without the need for coding experience.
 - Manage list of predefined locations
 
 ## Implemented (Feb 2026)
-- Backend
-  - `GET /api/stats`, `GET/POST/PUT/DELETE /api/costumes`, `GET /api/costumes/{id}`
-  - `GET/POST/DELETE /api/locations`, `GET/POST /api/categories`
-  - `POST /api/upload`, `GET /api/images/{id}` (via Emergent object storage)
-  - Seed defaults for locations & categories on startup
-- Frontend
-  - Dashboard page (stat tiles, size distribution, recently updated)
-  - Inventory page (search, filters, grid/list view, add/edit/delete)
-  - Costume detail page (full breakdown, edit/delete)
-  - Locations page (add/delete predefined locations)
-  - `CostumeFormDialog` reusable Add/Edit modal with image upload
+- **Iteration 1**:
+  - Backend: `GET /api/stats`, `GET/POST/PUT/DELETE /api/costumes`, `GET /api/costumes/{id}`, `GET/POST/DELETE /api/locations`, `GET/POST /api/categories`, `POST /api/upload`, `GET /api/images/{id}` (via Emergent object storage), seed defaults on startup.
+  - Frontend: Dashboard, Inventory (grid+list, filters), Costume Detail, Locations, `CostumeFormDialog`.
+- **Iteration 2**:
+  - Sizes extended to `XS/S/M/L/XL/XXL/XXXL`.
+  - `sub_location` field on costumes (preset + sub-location combo).
+  - Per-size notes (`size_notes` dict on costume).
+  - Flag/Unflag costumes with reason (`is_flagged`, `flag_reason`, `flagged_at`). Endpoints: `POST /api/costumes/{id}/flag`, `POST /api/costumes/{id}/unflag`, `GET /api/flagged`. Flagged filter in inventory + banner on dashboard + detail page.
+  - Removed size distribution from Dashboard, replaced with Flagged tile.
+  - Locations page: expandable rows showing costumes in each location + orphan (custom) locations section. New `GET /api/locations/costume-counts`.
+  - Settings tab (`/settings`) with org name, default view (grid/list), show flag banner toggle, category CRUD. `GET/PUT /api/settings`. `DELETE /api/categories/{id}` (409 if in use).
 
 ## Status
-- Backend: 14/14 pytest cases pass
-- Frontend: 100% of critical Playwright flows pass
-- Known minor: stats `category_count` derived from in-use categories only (acceptable)
+- Backend: 23/23 pytest cases pass (iteration 2)
+- Frontend: E2E flows verified; size-note reveal button hardened with functional setState.
 
 ## Backlog (Next)
 - P1: Bulk import (CSV) / export costumes
