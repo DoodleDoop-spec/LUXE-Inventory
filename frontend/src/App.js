@@ -7,6 +7,8 @@ import Inventory from "@/pages/Inventory";
 import CostumeDetail from "@/pages/CostumeDetail";
 import Locations from "@/pages/Locations";
 import Settings from "@/pages/Settings";
+import Shows from "@/pages/Shows";
+import ShowDetail from "@/pages/ShowDetail";
 
 function App() {
   return (
@@ -18,6 +20,8 @@ function App() {
             <Route path="/inventory" element={<Inventory />} />
             <Route path="/costume/:id" element={<CostumeDetail />} />
             <Route path="/locations" element={<Locations />} />
+            <Route path="/shows" element={<Shows />} />
+            <Route path="/shows/:id" element={<ShowDetail />} />
             <Route path="/settings" element={<Settings />} />
           </Route>
         </Routes>

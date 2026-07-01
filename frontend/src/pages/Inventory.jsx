@@ -14,6 +14,26 @@ import { toast } from "sonner";
 const ALL = "__all__";
 const DEFAULT_SORT = "origin_year_asc";
 
+// Given a flat list of {id, name, parent_id} nodes, return list of {id, path} in tree order.
+function subcategoryPathOptions(subs) {
+  const byId = {};
+  for (const s of subs || []) byId[s.id] = s;
+  const pathOf = (id) => {
+    const parts = [];
+    let cur = byId[id];
+    const seen = new Set();
+    while (cur && !seen.has(cur.id)) {
+      seen.add(cur.id);
+      parts.push(cur.name);
+      cur = cur.parent_id ? byId[cur.parent_id] : null;
+    }
+    return parts.reverse().join(" / ");
+  };
+  return (subs || [])
+    .map((s) => ({ id: s.id, path: pathOf(s.id) }))
+    .sort((a, b) => a.path.localeCompare(b.path));
+}
+
 export default function Inventory() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -27,6 +47,8 @@ export default function Inventory() {
   const [category, setCategory] = useState(ALL);
   const [subcategory, setSubcategory] = useState(ALL);
   const [loc, setLoc] = useState(ALL);
+  const [yearFilter, setYearFilter] = useState("");
+  const [showFilter, setShowFilter] = useState(ALL);
   const [flaggedOnly, setFlaggedOnly] = useState(false);
   const [sort, setSort] = useState(DEFAULT_SORT);
   const [view, setView] = useState("grid");
@@ -74,6 +96,11 @@ export default function Inventory() {
       if (category !== ALL) params.category = category;
       if (subcategory !== ALL) params.subcategory = subcategory;
       if (loc !== ALL) params.location = loc;
+      if (yearFilter.trim()) {
+        const y = parseInt(yearFilter, 10);
+        if (!isNaN(y)) params.year = y;
+      }
+      if (showFilter !== ALL) params.show_id = showFilter;
       if (flaggedOnly) params.flagged = true;
       params.sort = sort;
       const [c, cats, locs, systems, sh] = await Promise.all([
@@ -98,7 +125,7 @@ export default function Inventory() {
   useEffect(() => {
     fetchAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [category, subcategory, loc, flaggedOnly, sort]);
+  }, [category, subcategory, loc, yearFilter, showFilter, flaggedOnly, sort]);
 
   useEffect(() => {
     const t = setTimeout(() => fetchAll(), 300);
@@ -124,11 +151,12 @@ export default function Inventory() {
 
   const filterCount = useMemo(() => {
     return (category !== ALL ? 1 : 0) + (subcategory !== ALL ? 1 : 0)
-      + (loc !== ALL ? 1 : 0) + (flaggedOnly ? 1 : 0);
-  }, [category, subcategory, loc, flaggedOnly]);
+      + (loc !== ALL ? 1 : 0) + (yearFilter.trim() ? 1 : 0) + (showFilter !== ALL ? 1 : 0) + (flaggedOnly ? 1 : 0);
+  }, [category, subcategory, loc, yearFilter, showFilter, flaggedOnly]);
 
   const clearFilters = () => {
-    setCategory(ALL); setSubcategory(ALL); setLoc(ALL); setFlaggedOnly(false);
+    setCategory(ALL); setSubcategory(ALL); setLoc(ALL);
+    setYearFilter(""); setShowFilter(ALL); setFlaggedOnly(false);
   };
 
   const clearSearch = () => setQ("");
@@ -139,7 +167,6 @@ export default function Inventory() {
     updated_desc: "Recently updated",
     name_asc: "Name A → Z",
     total_desc: "Total qty ↓",
-    system_size: "Sizing system, then name",
   }[sort] || sort;
 
   return (
@@ -244,8 +271,8 @@ export default function Inventory() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={ALL}>All subcategories</SelectItem>
-                    {(currentCategory?.subcategories || []).map((s) => (
-                      <SelectItem key={s} value={s}>{s}</SelectItem>
+                    {subcategoryPathOptions(currentCategory?.subcategories || []).map((s) => (
+                      <SelectItem key={s.id} value={s.path}>{s.path}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -275,6 +302,31 @@ export default function Inventory() {
                 </button>
               </div>
             </div>
+            <div className="grid md:grid-cols-12 gap-3">
+              <div className="md:col-span-3">
+                <Input
+                  type="number"
+                  data-testid="filter-year"
+                  placeholder="Origin year (e.g. 2023)"
+                  value={yearFilter}
+                  onChange={(e) => setYearFilter(e.target.value)}
+                  className="h-11 rounded-none border-[#E4E4E7]"
+                />
+              </div>
+              <div className="md:col-span-4">
+                <Select value={showFilter} onValueChange={setShowFilter}>
+                  <SelectTrigger data-testid="filter-show" className="h-11 rounded-none border-[#E4E4E7]">
+                    <SelectValue placeholder="Show" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL}>All shows</SelectItem>
+                    {shows.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>{s.name}{s.year != null ? ` (${s.year})` : ""}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
             {filterCount > 0 && (
               <button
                 data-testid="clear-filters-btn"
@@ -299,7 +351,6 @@ export default function Inventory() {
                 <SelectItem value="updated_desc">Recently updated</SelectItem>
                 <SelectItem value="name_asc">Name A → Z</SelectItem>
                 <SelectItem value="total_desc">Total qty ↓</SelectItem>
-                <SelectItem value="system_size">Sizing system, then name</SelectItem>
               </SelectContent>
             </Select>
           </div>

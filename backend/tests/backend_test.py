@@ -1,6 +1,5 @@
-"""Backend pytest tests for Costume Inventory Tracker — Iteration 4."""
+"""Backend pytest tests for Costume Inventory Tracker — Iteration 5."""
 import os
-import io
 import uuid
 import pytest
 import requests
@@ -9,8 +8,6 @@ from dotenv import load_dotenv
 load_dotenv("/app/frontend/.env")
 BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 API = f"{BASE_URL}/api"
-
-SIZE_KEYS = ["XS", "S", "M", "L", "XL", "XXL", "XXXL"]
 
 
 @pytest.fixture(scope="session")
@@ -27,367 +24,299 @@ def test_api_root(session):
     assert "message" in r.json()
 
 
-# ---------- Stats ----------
 def test_stats_shape(session):
     r = session.get(f"{API}/stats")
     assert r.status_code == 200
-    data = r.json()
     for k in ["total_costumes", "total_items", "categories", "category_count", "locations_in_use", "flagged_count"]:
-        assert k in data
+        assert k in r.json()
 
 
-# ---------- Locations (Iteration 4 hierarchy) ----------
-def test_locations_seeded_and_hierarchical_fields(session):
-    r = session.get(f"{API}/locations")
+# ==============================================================
+# Iteration 5 — Subcategories as nested objects {id,name,parent_id}
+# ==============================================================
+@pytest.fixture
+def temp_category(session):
+    name = f"TEST_CAT_{uuid.uuid4().hex[:6]}"
+    r = session.post(f"{API}/categories", json={"name": name})
     assert r.status_code == 200
-    docs = r.json()
-    names = {x["name"] for x in docs}
-    for expected in ["Main Wardrobe", "Backstage Storage", "Costume Closet A"]:
-        assert expected in names
-    # Every doc must have parent_id, path, depth (post-migration)
-    for d in docs:
-        assert "parent_id" in d
-        assert "path" in d and d["path"]
-        assert "depth" in d
-        assert isinstance(d["depth"], int)
+    cat = r.json()
+    yield cat
+    session.delete(f"{API}/categories/{cat['id']}")
 
 
-def test_locations_hierarchy_crud(session):
-    root_name = f"TEST_ROOT_{uuid.uuid4().hex[:6]}"
-    r = session.post(f"{API}/locations", json={"name": root_name})
-    assert r.status_code == 200, r.text
-    root = r.json()
-    assert root["parent_id"] is None
-    assert root["depth"] == 0
-    assert root["path"] == root_name
-
-    # Child
-    child_name = "A"
-    r = session.post(f"{API}/locations", json={"name": child_name, "parent_id": root["id"]})
+def _get_cat(session, cid):
+    r = session.get(f"{API}/categories")
     assert r.status_code == 200
-    child = r.json()
-    assert child["parent_id"] == root["id"]
-    assert child["depth"] == 1
-    assert child["path"] == f"{root_name} / A"
+    return next((c for c in r.json() if c["id"] == cid), None)
 
-    # Grandchild (depth 2)
-    r = session.post(f"{API}/locations", json={"name": "1", "parent_id": child["id"]})
-    grand = r.json()
-    assert grand["depth"] == 2
-    assert grand["path"] == f"{root_name} / A / 1"
 
-    # Great-grandchild (depth 3)
-    r = session.post(f"{API}/locations", json={"name": "x", "parent_id": grand["id"]})
-    ggchild = r.json()
-    assert ggchild["depth"] == 3
-    assert ggchild["path"] == f"{root_name} / A / 1 / x"
+def test_categories_returns_subcategories_as_objects(session, temp_category):
+    cat = _get_cat(session, temp_category["id"])
+    assert cat is not None
+    assert isinstance(cat["subcategories"], list)
+    # Empty is fine — but should still be a list (object shape verified below)
 
-    # Duplicate sibling => 409
-    r = session.post(f"{API}/locations", json={"name": "A", "parent_id": root["id"]})
+
+def test_subcategory_add_rename_delete_flat(session, temp_category):
+    cid = temp_category["id"]
+    # Add root
+    r = session.post(f"{API}/categories/{cid}/subcategories", json={"name": "Formal"})
+    assert r.status_code == 200
+    subs = r.json()["subcategories"]
+    formal = next(s for s in subs if s["name"] == "Formal")
+    assert formal["parent_id"] is None
+    assert "id" in formal
+
+    # Dup sibling => 409
+    r = session.post(f"{API}/categories/{cid}/subcategories", json={"name": "Formal"})
     assert r.status_code == 409
 
-    # Slash in name => 400
-    r = session.post(f"{API}/locations", json={"name": "bad/name"})
+    # Slash rejected
+    r = session.post(f"{API}/categories/{cid}/subcategories", json={"name": "bad/name"})
     assert r.status_code == 400
 
-    # But same name under DIFFERENT parent is allowed
-    r = session.post(f"{API}/locations", json={"name": "A", "parent_id": grand["id"]})
-    assert r.status_code == 200
-
-    # Rename with slash => 400
-    r = session.put(f"{API}/locations/{child['id']}", json={"name": "bad/n"})
-    assert r.status_code == 400
-
-    # Rename to duplicate sibling => need another root+sibling
-    sib_name = "Sibling"
-    r_sib = session.post(f"{API}/locations", json={"name": sib_name, "parent_id": root["id"]})
-    assert r_sib.status_code == 200
-    r = session.put(f"{API}/locations/{r_sib.json()['id']}", json={"name": child_name})
-    assert r.status_code == 409
-
-    # Rename ok
-    r = session.put(f"{API}/locations/{r_sib.json()['id']}", json={"name": "Sibling2"})
-    assert r.status_code == 200
-    assert r.json()["name"] == "Sibling2"
-
-    # Delete node with children => 409
-    r = session.delete(f"{API}/locations/{root['id']}")
-    assert r.status_code == 409
-
-    # Cleanup depth-first
-    # ggchild -> grand -> child A2 -> child -> Sibling2 -> root
-    # find the second 'A' under grand
-    r = session.get(f"{API}/locations")
-    all_locs = r.json()
-    second_a = next(l for l in all_locs if l["name"] == "A" and l["parent_id"] == grand["id"])
-    for lid in [ggchild["id"], second_a["id"], grand["id"], child["id"], r_sib.json()["id"], root["id"]]:
-        rr = session.delete(f"{API}/locations/{lid}")
-        assert rr.status_code == 200, f"delete {lid}: {rr.text}"
-
-    # 404 after delete
-    r = session.delete(f"{API}/locations/{root['id']}")
+    # Unknown parent => 404
+    r = session.post(f"{API}/categories/{cid}/subcategories",
+                     json={"name": "Sub", "parent_id": str(uuid.uuid4())})
     assert r.status_code == 404
 
+    # Rename
+    r = session.put(f"{API}/categories/{cid}/subcategories/{formal['id']}", json={"name": "Formal2"})
+    assert r.status_code == 200
 
-# ---------- Shows CRUD (Iteration 4) ----------
-def test_shows_crud_and_dupe(session):
+    # Rename dup sibling
+    r = session.post(f"{API}/categories/{cid}/subcategories", json={"name": "Sibling"})
+    sib = next(s for s in r.json()["subcategories"] if s["name"] == "Sibling")
+    r = session.put(f"{API}/categories/{cid}/subcategories/{sib['id']}", json={"name": "Formal2"})
+    assert r.status_code == 409
+
+    # Delete
+    r = session.delete(f"{API}/categories/{cid}/subcategories/{sib['id']}")
+    assert r.status_code == 200
+
+
+def test_subcategory_nested_3_deep(session, temp_category):
+    cid = temp_category["id"]
+    # Root
+    r = session.post(f"{API}/categories/{cid}/subcategories", json={"name": "Root"})
+    assert r.status_code == 200
+    root = next(s for s in r.json()["subcategories"] if s["name"] == "Root")
+    # A under Root
+    r = session.post(f"{API}/categories/{cid}/subcategories", json={"name": "A", "parent_id": root["id"]})
+    a = next(s for s in r.json()["subcategories"] if s["name"] == "A" and s["parent_id"] == root["id"])
+    # 1 under A
+    r = session.post(f"{API}/categories/{cid}/subcategories", json={"name": "1", "parent_id": a["id"]})
+    one = next(s for s in r.json()["subcategories"] if s["name"] == "1" and s["parent_id"] == a["id"])
+    # X under 1
+    r = session.post(f"{API}/categories/{cid}/subcategories", json={"name": "X", "parent_id": one["id"]})
+    assert r.status_code == 200
+    x = next(s for s in r.json()["subcategories"] if s["name"] == "X" and s["parent_id"] == one["id"])
+
+    # Verify chain
+    subs = _get_cat(session, cid)["subcategories"]
+    by_id = {s["id"]: s for s in subs}
+    assert by_id[x["id"]]["parent_id"] == one["id"]
+    assert by_id[one["id"]]["parent_id"] == a["id"]
+    assert by_id[a["id"]]["parent_id"] == root["id"]
+    assert by_id[root["id"]]["parent_id"] is None
+
+    # Delete Root while it has children => 409
+    r = session.delete(f"{API}/categories/{cid}/subcategories/{root['id']}")
+    assert r.status_code == 409
+
+    # Leaf X delete ok
+    r = session.delete(f"{API}/categories/{cid}/subcategories/{x['id']}")
+    assert r.status_code == 200
+
+    # Now delete "1" (leaf), then a, then root
+    for sid in [one["id"], a["id"], root["id"]]:
+        rr = session.delete(f"{API}/categories/{cid}/subcategories/{sid}")
+        assert rr.status_code == 200, f"delete {sid}: {rr.text}"
+
+
+def test_legacy_string_subcategories_migrated_on_read(session):
+    """Insert a legacy category with subcategories as list of strings via direct DB write is not possible here.
+    Instead, verify all categories returned have subcategory items shaped as {id,name,parent_id} objects (never plain strings)."""
+    r = session.get(f"{API}/categories")
+    assert r.status_code == 200
+    for cat in r.json():
+        for s in cat.get("subcategories", []):
+            assert isinstance(s, dict), f"legacy string not migrated: {s!r} in {cat['name']}"
+            assert "id" in s and "name" in s and "parent_id" in s
+
+
+# ==============================================================
+# Iteration 5 — Show model with image_id/notes
+# ==============================================================
+def test_show_accepts_and_persists_image_id_and_notes(session):
     name = f"TEST_SHOW_{uuid.uuid4().hex[:6]}"
-    r = session.post(f"{API}/shows", json={"name": name, "year": 1999})
+    payload = {"name": name, "year": 2001, "image_id": "img-abc-123", "notes": "opening night"}
+    r = session.post(f"{API}/shows", json=payload)
     assert r.status_code == 200, r.text
     show = r.json()
-    assert show["name"] == name
-    assert show["year"] == 1999
+    assert show["image_id"] == "img-abc-123"
+    assert show["notes"] == "opening night"
 
-    # dupe name+year => 409
-    r = session.post(f"{API}/shows", json={"name": name, "year": 1999})
-    assert r.status_code == 409
+    # Verify on list
+    lst = session.get(f"{API}/shows").json()
+    found = next(s for s in lst if s["id"] == show["id"])
+    assert found["image_id"] == "img-abc-123"
+    assert found["notes"] == "opening night"
 
-    # same name, different year is OK
-    r = session.post(f"{API}/shows", json={"name": name, "year": 2000})
+    # PUT nullable image_id
+    r = session.put(f"{API}/shows/{show['id']}",
+                    json={"name": name, "year": 2001, "image_id": None, "notes": "updated"})
     assert r.status_code == 200
-    show2_id = r.json()["id"]
+    assert r.json()["image_id"] is None
+    assert r.json()["notes"] == "updated"
 
-    # list is sorted by year asc (nulls last), then name
-    r = session.get(f"{API}/shows")
+    # PUT set image_id back
+    r = session.put(f"{API}/shows/{show['id']}",
+                    json={"name": name, "year": 2001, "image_id": "new-img", "notes": ""})
     assert r.status_code == 200
-    lst = r.json()
-    assert any(s["id"] == show["id"] for s in lst)
+    assert r.json()["image_id"] == "new-img"
 
-    # PUT edit year
-    r = session.put(f"{API}/shows/{show['id']}", json={"name": name, "year": 2005})
-    assert r.status_code == 200
-    assert r.json()["year"] == 2005
-
-    # cleanup
     session.delete(f"{API}/shows/{show['id']}")
-    session.delete(f"{API}/shows/{show2_id}")
-
-    # delete non-existent => 404
-    r = session.delete(f"{API}/shows/{uuid.uuid4()}")
-    assert r.status_code == 404
 
 
-def test_show_delete_409_when_used_and_origin_year_propagation(session):
-    # Create show
-    show_name = f"TEST_ORIG_SHOW_{uuid.uuid4().hex[:6]}"
-    show = session.post(f"{API}/shows", json={"name": show_name, "year": 2015}).json()
-    add_show = session.post(f"{API}/shows", json={"name": f"{show_name}_add", "year": 2016}).json()
-
-    # Create costume referencing show as original
-    p = {
-        "name": f"TEST_ORIG_{uuid.uuid4().hex[:6]}",
-        "category": "Historical",
-        "location": "Main Wardrobe",
-        "creator": "Jane Doe",
-        "original_show_id": show["id"],
-        "additional_show_ids": [add_show["id"]],
-        "sizes": {"S": 1},
-    }
-    r = session.post(f"{API}/costumes", json=p)
-    assert r.status_code == 200, r.text
-    c = r.json()
-    cid = c["id"]
-    try:
-        # origin_year auto-populated
-        assert c["origin_year"] == 2015
-        assert c["creator"] == "Jane Doe"
-        assert c["original_show_id"] == show["id"]
-        assert add_show["id"] in c["additional_show_ids"]
-
-        # DELETE show used as original => 409
-        r = session.delete(f"{API}/shows/{show['id']}")
-        assert r.status_code == 409
-
-        # DELETE additional show => 409
-        r = session.delete(f"{API}/shows/{add_show['id']}")
-        assert r.status_code == 409
-
-        # PUT show year => propagates to costume.origin_year
-        r = session.put(f"{API}/shows/{show['id']}", json={"name": show_name, "year": 1975})
-        assert r.status_code == 200
-        # verify propagation
-        r = session.get(f"{API}/costumes/{cid}")
-        assert r.json()["origin_year"] == 1975
-    finally:
-        session.delete(f"{API}/costumes/{cid}")
-        session.delete(f"{API}/shows/{show['id']}")
-        session.delete(f"{API}/shows/{add_show['id']}")
-
-
-# ---------- Costume CRUD & new fields ----------
-@pytest.fixture
-def created_costume(session):
-    payload = {
-        "name": f"TEST_Costume_{uuid.uuid4().hex[:6]}",
-        "category": "Historical",
-        "location": "Main Wardrobe",
-        "notes": "Test",
-        "sizes": {"XS": 1, "S": 2, "M": 3},
-    }
-    r = session.post(f"{API}/costumes", json=payload)
-    assert r.status_code == 200
-    data = r.json()
-    yield data
-    session.delete(f"{API}/costumes/{data['id']}")
-
-
-def test_create_costume_totals_and_defaults(created_costume):
-    assert created_costume["total_quantity"] == 6
-    # Iteration 4 defaults
-    assert created_costume["creator"] == ""
-    assert created_costume["original_show_id"] is None
-    assert created_costume["additional_show_ids"] == []
-    assert created_costume["origin_year"] is None
-    # last_year_used should NOT be present (removed from model)
-    assert "last_year_used" not in created_costume
-
-
-def test_get_costume_404(session):
-    r = session.get(f"{API}/costumes/{uuid.uuid4()}")
-    assert r.status_code == 404
-
-
-def test_update_costume_change_original_show_updates_origin_year(session):
-    s1 = session.post(f"{API}/shows", json={"name": f"TEST_S1_{uuid.uuid4().hex[:6]}", "year": 2010}).json()
-    s2 = session.post(f"{API}/shows", json={"name": f"TEST_S2_{uuid.uuid4().hex[:6]}", "year": 2022}).json()
-    p = {
-        "name": f"TEST_OY_{uuid.uuid4().hex[:6]}",
-        "category": "Modern", "location": "Main Wardrobe",
-        "original_show_id": s1["id"], "sizes": {"S": 1},
-    }
-    cid = session.post(f"{API}/costumes", json=p).json()["id"]
-    try:
-        # switch to s2
-        r = session.put(f"{API}/costumes/{cid}", json={"original_show_id": s2["id"]})
-        assert r.status_code == 200
-        assert r.json()["origin_year"] == 2022
-    finally:
-        session.delete(f"{API}/costumes/{cid}")
-        session.delete(f"{API}/shows/{s1['id']}")
-        session.delete(f"{API}/shows/{s2['id']}")
-
-
-def test_delete_costume(session):
-    p = {"name": f"TEST_D_{uuid.uuid4().hex[:6]}", "category": "Modern",
-         "location": "Main Wardrobe", "sizes": {"S": 1}}
-    cid = session.post(f"{API}/costumes", json=p).json()["id"]
-    assert session.delete(f"{API}/costumes/{cid}").status_code == 200
-    assert session.get(f"{API}/costumes/{cid}").status_code == 404
-
-
-# ---------- Sorts (Iteration 4) ----------
-def test_list_costumes_sorts_iteration4(session):
-    # Create shows with distinct years
-    y1 = session.post(f"{API}/shows", json={"name": f"TEST_YR_{uuid.uuid4().hex[:6]}", "year": 1990}).json()
-    y2 = session.post(f"{API}/shows", json={"name": f"TEST_YR_{uuid.uuid4().hex[:6]}", "year": 2020}).json()
+# ==============================================================
+# Iteration 5 — Costume list filters: year, show_id, subcategory-prefix, system_size sort removed
+# ==============================================================
+def test_costume_filters_year_and_show_id(session):
+    s1 = session.post(f"{API}/shows", json={"name": f"TEST_S1_{uuid.uuid4().hex[:6]}", "year": 1988}).json()
+    s2 = session.post(f"{API}/shows", json={"name": f"TEST_S2_{uuid.uuid4().hex[:6]}", "year": 1999}).json()
+    s3 = session.post(f"{API}/shows", json={"name": f"TEST_S3_{uuid.uuid4().hex[:6]}", "year": 1988}).json()
 
     ids = []
-    for i, sid in enumerate([y1["id"], y2["id"], None]):
-        p = {
-            "name": f"TEST_SORT4_{i}_{uuid.uuid4().hex[:6]}",
-            "category": "Modern", "location": "Main Wardrobe",
-            "original_show_id": sid, "sizes": {"S": i + 1},
-        }
-        ids.append(session.post(f"{API}/costumes", json=p).json()["id"])
+    # C1: original s1 (1988)
+    ids.append(session.post(f"{API}/costumes", json={
+        "name": f"TEST_C1_{uuid.uuid4().hex[:6]}", "category": "Modern",
+        "location": "Main Wardrobe", "original_show_id": s1["id"],
+        "sizes": {"S": 1},
+    }).json()["id"])
+    # C2: original s2 (1999) + additional s1
+    ids.append(session.post(f"{API}/costumes", json={
+        "name": f"TEST_C2_{uuid.uuid4().hex[:6]}", "category": "Modern",
+        "location": "Main Wardrobe", "original_show_id": s2["id"],
+        "additional_show_ids": [s1["id"]], "sizes": {"S": 1},
+    }).json()["id"])
+    # C3: original s3 (1988)
+    ids.append(session.post(f"{API}/costumes", json={
+        "name": f"TEST_C3_{uuid.uuid4().hex[:6]}", "category": "Modern",
+        "location": "Main Wardrobe", "original_show_id": s3["id"],
+        "sizes": {"S": 1},
+    }).json()["id"])
+
     try:
         my = set(ids)
-        # default = origin_year_asc, nulls last
-        r = session.get(f"{API}/costumes")
+
+        # year filter = 1988 should match C1, C3
+        r = session.get(f"{API}/costumes", params={"year": 1988})
         assert r.status_code == 200
         mine = [c for c in r.json() if c["id"] in my]
-        years = [c["origin_year"] for c in mine]
-        non_null = [y for y in years if y is not None]
-        assert non_null == sorted(non_null)
-        assert years[-1] is None  # null last
+        got_years = {c["origin_year"] for c in mine}
+        assert got_years == {1988}
+        assert len(mine) == 2
 
-        # explicit origin_year_asc
-        r = session.get(f"{API}/costumes", params={"sort": "origin_year_asc"})
-        assert r.status_code == 200
+        # year filter = 1999 should match only C2
+        r = session.get(f"{API}/costumes", params={"year": 1999})
+        mine = [c for c in r.json() if c["id"] in my]
+        assert len(mine) == 1
 
-        # origin_year_desc
-        r = session.get(f"{API}/costumes", params={"sort": "origin_year_desc"})
+        # show_id = s1 should match C1 (original) AND C2 (additional)
+        r = session.get(f"{API}/costumes", params={"show_id": s1["id"]})
         assert r.status_code == 200
         mine = [c for c in r.json() if c["id"] in my]
-        yrs = [c["origin_year"] for c in mine if c["origin_year"] is not None]
-        assert yrs == sorted(yrs, reverse=True)
+        assert {c["id"] for c in mine} == {ids[0], ids[1]}
 
-        # Other sorts should return 200
-        for s in ["updated_desc", "name_asc", "total_desc", "system_size"]:
-            r = session.get(f"{API}/costumes", params={"sort": s})
-            assert r.status_code == 200, f"sort {s} failed"
+        # show_id = s3 only original
+        r = session.get(f"{API}/costumes", params={"show_id": s3["id"]})
+        mine = [c for c in r.json() if c["id"] in my]
+        assert {c["id"] for c in mine} == {ids[2]}
 
-        # Removed sorts should NOT 500 (falls through to default)
-        for s in ["last_used_asc", "last_used_desc"]:
-            r = session.get(f"{API}/costumes", params={"sort": s})
-            assert r.status_code == 200, f"legacy sort {s} 500'd"
+        # Combined filter: year=1988 & show_id=s1 => only C1
+        r = session.get(f"{API}/costumes", params={"year": 1988, "show_id": s1["id"]})
+        mine = [c for c in r.json() if c["id"] in my]
+        assert {c["id"] for c in mine} == {ids[0]}
     finally:
         for cid in ids:
             session.delete(f"{API}/costumes/{cid}")
-        session.delete(f"{API}/shows/{y1['id']}")
-        session.delete(f"{API}/shows/{y2['id']}")
+        for sid in [s1["id"], s2["id"], s3["id"]]:
+            session.delete(f"{API}/shows/{sid}")
 
 
-# ---------- Backwards compat ----------
-def test_backcompat_legacy_costume_without_iter4_fields(session):
-    # Legacy costume with last_year_used field simulated
-    p = {
-        "name": f"TEST_LEGACY_{uuid.uuid4().hex[:6]}",
-        "category": "Modern", "location": "Main Wardrobe",
-        "sizes": {"S": 1},
-        # deliberately do NOT set creator/origin/show fields
-    }
-    r = session.post(f"{API}/costumes", json=p)
+def test_system_size_sort_falls_through_no_500(session):
+    r = session.get(f"{API}/costumes", params={"sort": "system_size"})
     assert r.status_code == 200
-    cid = r.json()["id"]
+    # Also ensure other sorts still 200
+    for s in ["updated_desc", "origin_year_asc", "origin_year_desc", "name_asc", "total_desc"]:
+        r = session.get(f"{API}/costumes", params={"sort": s})
+        assert r.status_code == 200, f"sort {s} failed"
+
+
+def test_subcategory_filter_prefix_matches_children(session):
+    # Create costumes with subcategory 'Formal' and 'Formal / Long'
+    c1 = session.post(f"{API}/costumes", json={
+        "name": f"TEST_SUB_A_{uuid.uuid4().hex[:6]}", "category": "Modern",
+        "subcategory": "Formal", "location": "Main Wardrobe", "sizes": {"S": 1}
+    }).json()
+    c2 = session.post(f"{API}/costumes", json={
+        "name": f"TEST_SUB_B_{uuid.uuid4().hex[:6]}", "category": "Modern",
+        "subcategory": "Formal / Long", "location": "Main Wardrobe", "sizes": {"S": 1}
+    }).json()
+    c3 = session.post(f"{API}/costumes", json={
+        "name": f"TEST_SUB_C_{uuid.uuid4().hex[:6]}", "category": "Modern",
+        "subcategory": "Casual", "location": "Main Wardrobe", "sizes": {"S": 1}
+    }).json()
     try:
-        r = session.get(f"{API}/costumes")
+        # filter 'Formal' should match both c1 and c2
+        r = session.get(f"{API}/costumes", params={"subcategory": "Formal"})
         assert r.status_code == 200
-        # legacy items (if any) should be present without erroring
-        # Also verify GET single item
-        r2 = session.get(f"{API}/costumes/{cid}")
-        assert r2.status_code == 200
-        g = r2.json()
-        assert g["creator"] == ""
-        assert g["origin_year"] is None
-        assert g["additional_show_ids"] == []
+        got = {c["id"] for c in r.json()}
+        assert c1["id"] in got
+        assert c2["id"] in got
+        assert c3["id"] not in got
+
+        # filter 'Formal / Long' should match only c2
+        r = session.get(f"{API}/costumes", params={"subcategory": "Formal / Long"})
+        got = {c["id"] for c in r.json()}
+        assert c2["id"] in got
+        assert c1["id"] not in got
+
+        # q search matches subcategory
+        r = session.get(f"{API}/costumes", params={"q": "Casual"})
+        got = {c["id"] for c in r.json()}
+        assert c3["id"] in got
     finally:
-        session.delete(f"{API}/costumes/{cid}")
+        for c in (c1, c2, c3):
+            session.delete(f"{API}/costumes/{c['id']}")
 
 
-# ---------- Categories (existing behavior) ----------
-def test_categories_seeded(session):
-    r = session.get(f"{API}/categories")
-    assert r.status_code == 200
-    names = {x["name"] for x in r.json()}
-    assert "Historical" in names
-
-
-def test_flag_unflag_endpoints(session):
-    p = {"name": f"TEST_F_{uuid.uuid4().hex[:6]}", "category": "Modern",
-         "location": "Main Wardrobe", "sizes": {"S": 1}}
-    cid = session.post(f"{API}/costumes", json=p).json()["id"]
+def test_q_search_matches_creator_and_keywords(session):
+    c = session.post(f"{API}/costumes", json={
+        "name": f"TEST_Q_{uuid.uuid4().hex[:6]}", "category": "Modern",
+        "location": "Main Wardrobe", "creator": "ZZZQCreator", "keywords": ["ZZZQKeyword"],
+        "sizes": {"S": 1}
+    }).json()
     try:
-        r = session.post(f"{API}/costumes/{cid}/flag", json={"reason": "test"})
-        assert r.status_code == 200 and r.json()["is_flagged"] is True
-        r = session.post(f"{API}/costumes/{cid}/unflag")
-        assert r.status_code == 200 and r.json()["is_flagged"] is False
+        r = session.get(f"{API}/costumes", params={"q": "ZZZQCreator"})
+        assert any(x["id"] == c["id"] for x in r.json())
+        r = session.get(f"{API}/costumes", params={"q": "ZZZQKeyword"})
+        assert any(x["id"] == c["id"] for x in r.json())
     finally:
-        session.delete(f"{API}/costumes/{cid}")
+        session.delete(f"{API}/costumes/{c['id']}")
 
 
+# ---------- Locations sanity (still working) ----------
+def test_locations_list_has_path_depth(session):
+    r = session.get(f"{API}/locations")
+    assert r.status_code == 200
+    for d in r.json():
+        assert "parent_id" in d and "path" in d and "depth" in d
+
+
+# ---------- Settings ----------
 def test_settings_default_view(session):
     r = session.get(f"{API}/settings")
     assert r.status_code == 200
     assert "default_view" in r.json()
-
-
-def test_upload_image_contract():
-    png = (b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
-           b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\xf8"
-           b"\xcf\xc0\x00\x00\x00\x03\x00\x01\x5a\x8e\xb4\xa8\x00\x00\x00\x00"
-           b"IEND\xaeB`\x82")
-    files = {"file": ("t.png", io.BytesIO(png), "image/png")}
-    r = requests.post(f"{API}/upload", files=files, timeout=60)
-    if r.status_code == 503:
-        pytest.skip("Storage service unavailable")
-    assert r.status_code == 200

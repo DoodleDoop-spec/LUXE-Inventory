@@ -3,7 +3,10 @@ import { ChevronDown, ChevronRight, MapPin, Plus, Pencil, Trash2, X, Check } fro
 import { Input } from "@/components/ui/input";
 
 export default function LocationTree(props) {
-  const { locations, onAdd, onRename, onDelete, onSelect, renderExtras, counts } = props;
+  const {
+    locations, onAdd, onRename, onDelete, onSelect, renderExtras, counts,
+    icon: IconComp = MapPin, addChildTitle = "Add nested location", maxDepth = 20,
+  } = props;
   const countsMap = counts || {};
   const [expanded, setExpanded] = useState({});
   const [renamingId, setRenamingId] = useState(null);
@@ -88,7 +91,7 @@ export default function LocationTree(props) {
               >
                 {hasKids ? (isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />) : <span className="w-4" />}
               </button>
-              <MapPin className="h-4 w-4 text-[#71717A] mx-2 shrink-0" />
+              <IconComp className="h-4 w-4 text-[#71717A] mx-2 shrink-0" />
               {isRenaming ? (
                 <div className="flex items-center gap-1 flex-1">
                   <Input
@@ -126,14 +129,14 @@ export default function LocationTree(props) {
               )}
               {!isRenaming && (
                 <div className="flex items-center gap-0.5 shrink-0">
-                  {onAdd && depth < 6 && (
+                  {onAdd && depth < maxDepth && (
                     <button
                       type="button"
                       onClick={() => { setAddingChildId(isAddingHere ? null : node.id); setNewChildName(""); }}
                       className="p-1.5 text-[#71717A] hover:text-[#09090B] hover:bg-[#F4F4F5]"
                       aria-label="Add child"
                       data-testid={"tree-add-child-btn-" + node.id}
-                      title="Add nested location"
+                      title={addChildTitle}
                     >
                       <Plus className="h-4 w-4" />
                     </button>

@@ -20,7 +20,7 @@ export default function CostumeFormDialog({
   const [name, setName] = useState("");
   const [category, setCategory] = useState("");
   const [newCategory, setNewCategory] = useState("");
-  const [subcategory, setSubcategory] = useState("");
+  const [subcategoryPath, setSubcategoryPath] = useState([]); // array of subcategory ids
   const [systemName, setSystemName] = useState("Letter");
   const [locMode, setLocMode] = useState("preset");
   const [locPath, setLocPath] = useState([]); // array of location ids representing chosen path
@@ -47,12 +47,39 @@ export default function CostumeFormDialog({
     [sizingSystems, systemName]
   );
   const sizeKeys = currentSystem?.sizes || [];
+  const total = sizeKeys.reduce((acc, s) => acc + (Number(sizes[s]) || 0), 0);
 
   const currentCategory = useMemo(
     () => (categories || []).find((c) => c.name === category),
     [categories, category]
   );
-  const availableSubcategories = currentCategory?.subcategories || [];
+  const subcatNodes = currentCategory?.subcategories || [];
+  const subcatById = useMemo(() => {
+    const m = {};
+    for (const s of subcatNodes) m[s.id] = s;
+    return m;
+  }, [subcatNodes]);
+  const subcatChildrenOf = (parentId) => subcatNodes.filter((s) => (s.parent_id || null) === parentId);
+  const subcatLevels = useMemo(() => {
+    const arr = [];
+    let parentId = null;
+    for (let i = 0; i <= subcategoryPath.length; i++) {
+      const opts = subcatChildrenOf(parentId);
+      if (opts.length === 0) break;
+      arr.push({ parentId, options: opts, selected: subcategoryPath[i] || "" });
+      parentId = subcategoryPath[i] || null;
+      if (!parentId) break;
+    }
+    return arr;
+  }, [subcategoryPath, subcatNodes]); // eslint-disable-line react-hooks/exhaustive-deps
+  const chosenSubcategoryPath = subcategoryPath.length
+    ? subcategoryPath.map((id) => subcatById[id]?.name).filter(Boolean).join(" / ")
+    : "";
+  const selectSubcatLevel = (level, value) => {
+    const next = subcategoryPath.slice(0, level);
+    if (value) next.push(value);
+    setSubcategoryPath(next);
+  };
 
   // Location tree helpers
   const locById = useMemo(() => {
@@ -68,7 +95,7 @@ export default function CostumeFormDialog({
       setName(editing.name || "");
       setCategory(editing.category || "");
       setNewCategory("");
-      setSubcategory(editing.subcategory || "");
+      setSubcategoryPath([]);
       setSystemName(editing.sizing_system || "Letter");
       // Try to reconstruct locPath from stored location path
       const match = (locations || []).find((l) => l.path === editing.location);
@@ -99,7 +126,7 @@ export default function CostumeFormDialog({
       setAdditionalShowIds(editing.additional_show_ids || []);
       setKeywords(editing.keywords || []);
     } else {
-      setName(""); setCategory(""); setNewCategory(""); setSubcategory("");
+      setName(""); setCategory(""); setNewCategory("");
       setSystemName("Letter");
       setLocMode("preset"); setLocPath([]); setSubLocation(""); setCustomLocation("");
       setNotes("");
@@ -131,7 +158,20 @@ export default function CostumeFormDialog({
     });
   }, [systemName]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const total = sizeKeys.reduce((acc, s) => acc + (Number(sizes[s]) || 0), 0);
+  // Reconstruct subcategoryPath from editing.subcategory (string like "Formal / Long")
+  useEffect(() => {
+    if (!open || !editing?.subcategory || subcatNodes.length === 0) return;
+    const parts = editing.subcategory.split(" / ").map((p) => p.trim());
+    const ids = [];
+    let parentId = null;
+    for (const partName of parts) {
+      const match = subcatNodes.find((s) => (s.parent_id || null) === parentId && s.name === partName);
+      if (!match) break;
+      ids.push(match.id);
+      parentId = match.id;
+    }
+    if (ids.length) setSubcategoryPath(ids);
+  }, [open, editing, subcatNodes]);
 
   // Hierarchical location select
   const selectAtLevel = (level, value) => {
@@ -211,7 +251,7 @@ export default function CostumeFormDialog({
       const payload = {
         name: name.trim(),
         category: finalCategory,
-        subcategory: subcategory.trim(),
+        subcategory: chosenSubcategoryPath,
         location: finalLocation,
         sub_location: locMode === "preset" ? subLocation.trim() : "",
         notes: notes.trim(),
@@ -261,7 +301,7 @@ export default function CostumeFormDialog({
             </div>
             <div className="space-y-2">
               <Label className="eyebrow">CATEGORY *</Label>
-              <Select value={category} onValueChange={(v) => { setCategory(v); setSubcategory(""); }}>
+              <Select value={category} onValueChange={(v) => { setCategory(v); setSubcategoryPath([]); }}>
                 <SelectTrigger data-testid="form-category" className="rounded-none border-[#E4E4E7] h-11">
                   <SelectValue placeholder="Select category" />
                 </SelectTrigger>
@@ -278,20 +318,31 @@ export default function CostumeFormDialog({
             </div>
           </div>
 
-          {category && category !== "__new__" && availableSubcategories.length > 0 && (
+          {category && category !== "__new__" && subcatNodes.length > 0 && (
             <div className="space-y-2">
               <Label className="eyebrow">SUBCATEGORY</Label>
-              <Select value={subcategory || "__none__"} onValueChange={(v) => setSubcategory(v === "__none__" ? "" : v)}>
-                <SelectTrigger data-testid="form-subcategory" className="rounded-none border-[#E4E4E7] h-11 max-w-md">
-                  <SelectValue placeholder="Select subcategory (optional)" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">— None —</SelectItem>
-                  {availableSubcategories.map((s) => (
-                    <SelectItem key={s} value={s}>{s}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="grid md:grid-cols-3 gap-2">
+                {subcatLevels.map((lvl, i) => (
+                  <Select
+                    key={i}
+                    value={lvl.selected || "__none__"}
+                    onValueChange={(v) => selectSubcatLevel(i, v === "__none__" ? "" : v)}
+                  >
+                    <SelectTrigger data-testid={`form-subcategory-level-${i}`} className="rounded-none border-[#E4E4E7] h-11">
+                      <SelectValue placeholder={i === 0 ? "Choose subcategory" : "Nested (optional)"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">— {i === 0 ? "none" : "stop here"} —</SelectItem>
+                      {lvl.options.map((s) => (
+                        <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ))}
+              </div>
+              {chosenSubcategoryPath && (
+                <p className="text-xs text-[#71717A]">Selected: <span className="font-medium text-[#09090B]">{chosenSubcategoryPath}</span></p>
+              )}
             </div>
           )}
 

@@ -190,12 +190,25 @@ class Show(BaseModel):
     id: str
     name: str
     year: Optional[int] = None
+    image_id: Optional[str] = None
+    notes: Optional[str] = ""
     created_at: str
 
 
 class ShowPayload(BaseModel):
     name: str
     year: Optional[int] = None
+    image_id: Optional[str] = None
+    notes: Optional[str] = ""
+
+
+class SubcategoryPayload(BaseModel):
+    name: str
+    parent_id: Optional[str] = None
+
+
+class SubcategoryRename(BaseModel):
+    name: str
 
 
 class SizingSystem(BaseModel):
@@ -211,8 +224,31 @@ class SizingSystemPayload(BaseModel):
     sizes: List[str]
 
 
-class SubcategoryPayload(BaseModel):
-    name: str
+def _normalize_subcategories(subs):
+    """Migrate flat list of strings → list of dicts with id/name/parent_id."""
+    out = []
+    for s in subs or []:
+        if isinstance(s, str):
+            out.append({"id": str(uuid.uuid4()), "name": s, "parent_id": None})
+        elif isinstance(s, dict):
+            out.append({
+                "id": s.get("id") or str(uuid.uuid4()),
+                "name": s.get("name", ""),
+                "parent_id": s.get("parent_id"),
+            })
+    return out
+
+
+def _subcategory_path(subs, sub_id):
+    by_id = {s["id"]: s for s in subs}
+    parts = []
+    cur = by_id.get(sub_id)
+    seen = set()
+    while cur and cur["id"] not in seen:
+        seen.add(cur["id"])
+        parts.append(cur.get("name", ""))
+        cur = by_id.get(cur.get("parent_id")) if cur.get("parent_id") else None
+    return " / ".join(reversed(parts))
 
 
 class LocationItem(BaseModel):
@@ -273,6 +309,8 @@ async def list_costumes(
     location: Optional[str] = None,
     size: Optional[str] = None,
     sizing_system: Optional[str] = None,
+    year: Optional[int] = None,
+    show_id: Optional[str] = None,
     flagged: Optional[bool] = None,
     sort: Optional[str] = None,
 ):
@@ -291,17 +329,27 @@ async def list_costumes(
     if category:
         query["category"] = category
     if subcategory:
-        query["subcategory"] = subcategory
+        # Match costumes whose subcategory path starts with the given path (so parent selection includes children)
+        query["subcategory"] = {"$regex": f"^{subcategory}(?: / |$)"}
     if location:
         query["location"] = location
     if size:
         query[f"sizes.{size}"] = {"$gt": 0}
     if sizing_system:
         query["sizing_system"] = sizing_system
+    if year is not None:
+        query["origin_year"] = year
+    if show_id:
+        query["$and"] = query.get("$and", []) + [{
+            "$or": [
+                {"original_show_id": show_id},
+                {"additional_show_ids": show_id},
+            ]
+        }]
     if flagged is not None:
         query["is_flagged"] = flagged
     # Sorting
-    sort_spec = [("origin_year", 1), ("name", 1)]  # default: origin year asc
+    sort_spec = [("origin_year", 1), ("name", 1)]
     if sort == "updated_desc":
         sort_spec = [("updated_at", -1)]
     elif sort == "origin_year_asc":
@@ -312,10 +360,7 @@ async def list_costumes(
         sort_spec = [("name", 1)]
     elif sort == "total_desc":
         sort_spec = [("total_quantity", -1)]
-    elif sort == "system_size":
-        sort_spec = [("sizing_system", 1), ("name", 1)]
     docs = await db.costumes.find(query, {"_id": 0}).sort(sort_spec).to_list(2000)
-    # Push nulls to the end for ascending year sorts
     if sort in (None, "origin_year_asc"):
         docs.sort(key=lambda d: (d.get("origin_year") is None, d.get("origin_year") or 0, d.get("name", "").lower()))
     return docs
@@ -559,7 +604,7 @@ async def delete_location(location_id: str):
 async def list_categories():
     docs = await db.categories.find({}, {"_id": 0}).sort("name", 1).to_list(500)
     for d in docs:
-        d.setdefault("subcategories", [])
+        d["subcategories"] = _normalize_subcategories(d.get("subcategories"))
     existing = {d["name"] for d in docs}
     used = await db.costumes.distinct("category")
     for u in used:
@@ -577,8 +622,9 @@ async def create_category(payload: LocationCreate):
     existing = await db.categories.find_one({"name": name})
     if existing:
         existing.pop("_id", None)
+        existing["subcategories"] = _normalize_subcategories(existing.get("subcategories"))
         return existing
-    doc = {"id": str(uuid.uuid4()), "name": name, "created_at": _now_iso()}
+    doc = {"id": str(uuid.uuid4()), "name": name, "subcategories": [], "created_at": _now_iso()}
     await db.categories.insert_one(doc)
     doc.pop("_id", None)
     return doc
@@ -589,7 +635,6 @@ async def delete_category(category_id: str):
     doc = await db.categories.find_one({"id": category_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Category not found")
-    # Check if any costume uses this category
     in_use = await db.costumes.count_documents({"category": doc["name"]})
     if in_use > 0:
         raise HTTPException(status_code=409, detail=f"Category is used by {in_use} costume(s)")
@@ -607,21 +652,47 @@ async def add_subcategory(category_id: str, payload: SubcategoryPayload):
         raise HTTPException(status_code=400, detail="Subcategory name required")
     if "/" in name:
         raise HTTPException(status_code=400, detail="Subcategory name cannot contain '/'")
-    subs = doc.get("subcategories") or []
-    if any(s.lower() == name.lower() for s in subs):
-        raise HTTPException(status_code=409, detail="Subcategory already exists")
-    subs.append(name)
+    subs = _normalize_subcategories(doc.get("subcategories"))
+    parent_id = payload.parent_id
+    if parent_id and not any(s["id"] == parent_id for s in subs):
+        raise HTTPException(status_code=404, detail="Parent subcategory not found")
+    if any(s["name"].lower() == name.lower() and s.get("parent_id") == parent_id for s in subs):
+        raise HTTPException(status_code=409, detail="Subcategory already exists under this parent")
+    subs.append({"id": str(uuid.uuid4()), "name": name, "parent_id": parent_id})
     await db.categories.update_one({"id": category_id}, {"$set": {"subcategories": subs}})
     updated = await db.categories.find_one({"id": category_id}, {"_id": 0})
+    updated["subcategories"] = _normalize_subcategories(updated.get("subcategories"))
     return updated
 
 
-@api_router.delete("/categories/{category_id}/subcategories/{sub_name}")
-async def delete_subcategory(category_id: str, sub_name: str):
+@api_router.put("/categories/{category_id}/subcategories/{sub_id}")
+async def rename_subcategory(category_id: str, sub_id: str, payload: SubcategoryRename):
     doc = await db.categories.find_one({"id": category_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Category not found")
-    subs = [s for s in (doc.get("subcategories") or []) if s != sub_name]
+    name = payload.name.strip()
+    if not name or "/" in name:
+        raise HTTPException(status_code=400, detail="Invalid name")
+    subs = _normalize_subcategories(doc.get("subcategories"))
+    target = next((s for s in subs if s["id"] == sub_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Subcategory not found")
+    if any(s["id"] != sub_id and s["name"].lower() == name.lower() and s.get("parent_id") == target.get("parent_id") for s in subs):
+        raise HTTPException(status_code=409, detail="Sibling with that name already exists")
+    target["name"] = name
+    await db.categories.update_one({"id": category_id}, {"$set": {"subcategories": subs}})
+    return {"ok": True}
+
+
+@api_router.delete("/categories/{category_id}/subcategories/{sub_id}")
+async def delete_subcategory(category_id: str, sub_id: str):
+    doc = await db.categories.find_one({"id": category_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Category not found")
+    subs = _normalize_subcategories(doc.get("subcategories"))
+    if any(s.get("parent_id") == sub_id for s in subs):
+        raise HTTPException(status_code=409, detail="Subcategory has nested items; delete them first")
+    subs = [s for s in subs if s["id"] != sub_id]
     await db.categories.update_one({"id": category_id}, {"$set": {"subcategories": subs}})
     return {"ok": True}
 
@@ -695,7 +766,14 @@ async def create_show(payload: ShowPayload):
     dupe = await db.shows.find_one({"name": name, "year": year})
     if dupe:
         raise HTTPException(status_code=409, detail="Show already exists")
-    doc = {"id": str(uuid.uuid4()), "name": name, "year": year, "created_at": _now_iso()}
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "year": year,
+        "image_id": payload.image_id,
+        "notes": (payload.notes or "").strip(),
+        "created_at": _now_iso(),
+    }
     await db.shows.insert_one(doc)
     doc.pop("_id", None)
     return doc
@@ -710,8 +788,13 @@ async def update_show(show_id: str, payload: ShowPayload):
     if not name:
         raise HTTPException(status_code=400, detail="Name required")
     year = int(payload.year) if payload.year is not None else None
-    await db.shows.update_one({"id": show_id}, {"$set": {"name": name, "year": year}})
-    # Re-compute origin_year on costumes using this show
+    updates = {
+        "name": name,
+        "year": year,
+        "image_id": payload.image_id,
+        "notes": (payload.notes or "").strip(),
+    }
+    await db.shows.update_one({"id": show_id}, {"$set": updates})
     await db.costumes.update_many(
         {"original_show_id": show_id},
         {"$set": {"origin_year": year, "updated_at": _now_iso()}}

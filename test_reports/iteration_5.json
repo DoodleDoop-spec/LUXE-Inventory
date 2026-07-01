@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 5 full-stack verification. Backend 13/13 pytest tests PASS. Frontend E2E confirms all iter-5 spec testids. Verified: (a) Subcategory tree per category — POST /api/categories/{id}/subcategories accepts {name,parent_id?}; 409 on dup within same parent; 404 on unknown parent_id; 400 on '/' in name. PUT renames (409 sibling dup). DELETE returns 409 if children exist, 200 otherwise. Legacy string subcategories are auto-migrated to {id,name,parent_id:null} on read. Nested 4-deep (Root→A→1→X) verified with correct parent_id chain. (b) Show model persists image_id (nullable) and notes across POST/PUT/GET. (c) GET /api/costumes accepts year=<int> (matches origin_year) and show_id=<uuid> (matches original_show_id OR additional_show_ids); combined filters work. sort=system_size returns 200 (falls through, no 500). (d) subcategory filter uses regex prefix match so filter 'Formal' returns costumes with subcategory 'Formal' and 'Formal / Long'. (e) q search still hits creator/keywords/subcategory. Frontend E2E on preview URL: Nav order Dashboard→Inventory→Shows→Locations→Settings (5 items, nav-shows present). /shows renders shows-page with year-sections=2 (2026 shown before 2025 — newest first), show-cards render, clicking navigates to /shows/:id which renders show-detail-page + show-name + show-year + originals-section; additionals-section correctly hidden when empty. /locations is view-only (7 tree-names, 0 add/rename/delete buttons); click a tree-name loads the right panel contents (contained header + empty-state card). /settings shows FULL edit tree for Locations (add=7/rename=7/delete=7), 12 cat-rows; expanding a category reveals add-subcat-btn-{cid} + new-subcat-input-{cid}; Shows are grouped in year-blocks with toggle-year; edit-show-{id} reveals show-file-input-{id} + save-edit-show-{id}. /inventory filters panel has filter-year + filter-show + filter-category + filter-subcategory + filter-location; sort panel no longer contains 'Sizing system, then name'.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/locations right panel", "issues": ["When a location has no costumes, the empty-state card ('No costumes stored here.') does not carry the data-testid='locations-contents-list' wrapper — only the populated list branch has it. Minor, but if next testing agent asserts the testid on empty state it will fail. Consider always emitting the wrapper with an empty children slot."]},
+      {"screen": "/shows and /shows/:id film placeholder", "issues": ["Shows without image_id render a large gray card with a film-strip glyph — the placeholder aspect ratio (~1.6:1) leaves a big empty area to the right on wide screens. Aesthetic only; matches iter-5 spec."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Optional) Attach data-testid='locations-contents-list' to the empty-state card on /locations so tests can assert its presence regardless of population.",
+    "(Optional) Improve empty-photo placeholder styling on /shows so it doesn't dominate the right side of the layout."
+  ],
+  "critical_code_review_comments": [
+    "server.py list_categories still auto-synthesizes ghost category docs from distinct costume.category values with a fresh uuid on every call — the client will see a new id per request for any category not stored in db.categories. Persist these on first read or filter them out.",
+    "server.py subcategory filter uses regex without escaping: query['subcategory'] = {'$regex': f'^{subcategory}(?: / |$)'} — a user-supplied subcategory containing regex metacharacters (e.g. '.', '(', '$') will break the query or match unintended docs. Use re.escape() on the value.",
+    "server.py update_show does not validate name-year uniqueness on PUT — you can rename+re-year a show to collide with an existing (name, year) pair; POST correctly 409s, PUT silently accepts. Add the same dupe check on PUT.",
+    "server.py still uses deprecated @app.on_event('startup'/'shutdown') — migrate to FastAPI lifespan.",
+    "server.py put_object / get_object use synchronous requests inside async handlers — blocks the event loop. Switch to httpx.AsyncClient or run in a threadpool.",
+    "Subcategory rename does NOT propagate to costume.subcategory strings — a costume stored with subcategory='Formal' will still show 'Formal' even after the subcategory node is renamed to 'Formal2'. Legacy compat is preserved for reads but the app-wide rename is silently inconsistent.",
+    "delete_subcategory: only blocks direct children (parent_id == sub_id) but does not check if any costume currently uses that subcategory path — deleting a leaf still referenced by a costume leaves an orphan subcategory string on the costume.",
+    "CostumeUpdate uses model_dump(exclude_none=True) — clients cannot explicitly clear original_show_id / image_id via PUT (passing null is dropped)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (rewrote as iteration-5 suite: 13 tests covering subcategory tree CRUD + 3-deep nesting + legacy migration, show image_id/notes persistence, costume year/show_id filters + subcategory prefix regex + q-search, system_size sort no-500, locations sanity)"
+  ],
+  "success_rate": {"backend": "100% (13/13)", "frontend": "100% of iteration-5 spec testids verified"},
+  "test_credentials": "N/A (no auth in this app; /app/memory/test_credentials.md not present)",
+  "seed_data_creation": "pytest creates and self-cleans TEST_* categories/subcategories/shows/costumes. Left in DB from prior iterations: a few 'TEST_CAT_*' rows visible in Settings — harmless.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "backend_test.py at /app/backend/tests/backend_test.py is the current iteration-5 regression suite (13 tests, ~10s runtime). Key iter-5 endpoints: GET /api/categories returns subcategories AS list of {id,name,parent_id} objects (legacy strings auto-migrated on read); POST/PUT/DELETE /api/categories/{cid}/subcategories(/{sid}); Show now has image_id (nullable) + notes; GET /api/costumes accepts year + show_id + subcategory (regex-prefix); sort=system_size falls through (200). Frontend: nav has 5 items incl nav-shows; /shows uses year-section-{year}+toggle-year-{year}+show-card-{id}; /shows/:id uses show-detail-page+show-name+show-year+originals-section+additionals-section (hidden when empty)+show-costume-{id}; /locations is VIEW-ONLY (no add/rename/delete on tree rows) with locations-contents-list + loc-costume-{id} on the right panel; /settings has the FULL location editor + per-category nested subcategory tree (add-subcat-btn-{cid} + new-subcat-input-{cid}) + shows grouped by year-block-{year}+toggle-year-{year} with edit-show-{id}→show-file-input-{id}+save-edit-show-{id}; /inventory has filter-year + filter-show + filter-category/subcategory/location/flagged; sort no longer offers 'Sizing system, then name'.",
+  "rca of the issue": "N/A — no bugs found. The listed critical_code_review_comments are pre-existing hardening opportunities; none block iteration-5 acceptance."
+}
