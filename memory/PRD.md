@@ -69,9 +69,16 @@ without the need for coding experience.
   - Inventory: added **filter-year** and **filter-show**; removed `system_size` sort.
   - Hardening: PUT `/api/shows/{id}` now 409s on name+year collisions; subcategory-prefix regex is escaped safely.
 
+- **Iteration 6 (bug fix + polish)**:
+  - **BUG FIX**: nested subcategory creation returned "Parent subcategory not found". Root cause: legacy string-subcategories were normalized on read but not persisted, so client-visible IDs kept regenerating. Fix: `list_categories` now persists normalized shape when it detects legacy strings, and `add_subcategory` persists before parent-id validation. Verified with direct-DB reproducer.
+  - Removed "INDEX NN /" text from all page eyebrows.
+  - Renamed **All Costumes → All Inventory**; nav & dashboard stat icon switched from Shirt → Package (inclusive of accessories added as a category).
+  - Shows page: replaced `gap-px bg-[#E4E4E7]` grid seams with `gap-6` + per-card borders — no more grey box under each year.
+  - Default costume sort is now **`origin_year_desc` (Most recently used)** on both Inventory and the Dashboard "Most recently used" section. Sort labels simplified (Most recently used / Oldest first / Recently updated / Name A→Z / Total qty ↓).
+
 ## Status
-- Backend: 13/13 pytest cases pass (iteration 5)
-- Frontend: all iter-5 testids verified via Playwright
+- Backend: 17/17 pytest tests pass (iter-5 + iter-6)
+- Frontend: 100% of iter-6 spec verified by testing agent
 
 ## Backlog (Next)
 - P1: Bulk import (CSV) / export costumes
