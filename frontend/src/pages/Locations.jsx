@@ -68,8 +68,8 @@ export default function Locations() {
           ) : list == null ? (
             <div className="border border-[#E4E4E7] p-10 text-center text-[#71717A]">Loading…</div>
           ) : list.length === 0 ? (
-            <div className="border border-[#E4E4E7] p-10 text-center text-[#71717A]" data-testid="locations-empty-contents">
-              No costumes stored here.
+            <div className="border border-[#E4E4E7] p-10 text-center text-[#71717A]" data-testid="locations-contents-list">
+              <span data-testid="locations-empty-contents">No costumes stored here.</span>
             </div>
           ) : (
             <ul className="border border-[#E4E4E7] divide-y divide-[#E4E4E7]" data-testid="locations-contents-list">

@@ -61,10 +61,17 @@ without the need for coding experience.
   - Search bar X-clear (global + local).
   - **LUXE logo** in header (`/assets/logo.webp`), Dashboard hero: "LUXE Inventory Management System".
 
+- **Iteration 5**:
+  - Locations page is now **view-only** (click a tree node → contents on right); nesting/edit moved fully to Settings.
+  - **Nested subcategories** (unlimited depth) — categories store `[{id, name, parent_id}]`. Auto-migrates legacy string subcategories on read. Full CRUD + tree editor in Settings; cascading picker in the costume form; regex-prefix filter includes descendants.
+  - **Shows grouped by year** in Settings (accordion). Show model gained `image_id` + `notes`; edit form uploads a photo used by the app.
+  - New **Shows tab** (`/shows`) + per-show detail (`/shows/:id`) listing originals + additional costumes with photos.
+  - Inventory: added **filter-year** and **filter-show**; removed `system_size` sort.
+  - Hardening: PUT `/api/shows/{id}` now 409s on name+year collisions; subcategory-prefix regex is escaped safely.
+
 ## Status
-- Backend: 16/16 pytest cases pass (iteration 4)
-- Frontend: All spec'd testids verified via Playwright
-- Minor cosmetic fixes applied: dashboard empty-tile hidden when < 4 recent; list-view thumbnail shows placeholder icon.
+- Backend: 13/13 pytest cases pass (iteration 5)
+- Frontend: all iter-5 testids verified via Playwright
 
 ## Backlog (Next)
 - P1: Bulk import (CSV) / export costumes

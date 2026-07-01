@@ -329,8 +329,9 @@ async def list_costumes(
     if category:
         query["category"] = category
     if subcategory:
+        import re as _re
         # Match costumes whose subcategory path starts with the given path (so parent selection includes children)
-        query["subcategory"] = {"$regex": f"^{subcategory}(?: / |$)"}
+        query["subcategory"] = {"$regex": f"^{_re.escape(subcategory)}(?: / |$)"}
     if location:
         query["location"] = location
     if size:
@@ -788,6 +789,9 @@ async def update_show(show_id: str, payload: ShowPayload):
     if not name:
         raise HTTPException(status_code=400, detail="Name required")
     year = int(payload.year) if payload.year is not None else None
+    dupe = await db.shows.find_one({"name": name, "year": year, "id": {"$ne": show_id}})
+    if dupe:
+        raise HTTPException(status_code=409, detail="Another show with that name+year already exists")
     updates = {
         "name": name,
         "year": year,
