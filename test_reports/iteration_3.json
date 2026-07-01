@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 3 full-stack verification. Backend: all 31 pytest cases PASS (100%) covering sizing-systems CRUD (seeded Letter/Number(Even)/Tall/Petite, POST/PUT/DELETE, 409 on duplicate, 409 on in-use), subcategories (POST/DELETE with 409 duplicate/400 empty/404 unknown), costumes with sizing_system/subcategory/keywords/last_year_used, PUT updates (keywords dedupe+trim), list filters (subcategory, sizing_system), and sorts (last_used_asc nulls-last / last_used_desc / name_asc / total_desc / system_size) + q search matching keywords. Backwards compat verified: legacy costume without sizing_system defaults to 'Letter', missing keywords defaults to []. Frontend E2E verified: global-search-input in header submits on Enter -> /inventory?q= and populates search-input. filter-subcategory (disabled state), filter-sizing-system, sort-select with all 6 options, CostumeFormDialog with form-sizing-system (dynamic size grid — switching to Tall shows form-size-4T, hides form-size-XS), form-last-year, form-kw-input (Enter and comma add chips with testid form-kw-chip-{kw}, Backspace removes last), form-subcategory shown when category has subs. CostumeDetail shows detail-name, detail-size-{XS..XXXL} (dynamic), 'SYSTEM · Letter' label, and subcategory next to category (e.g. 'T/B TOP · Jacket'). detail-last-year/detail-keywords are conditionally rendered (correctly absent for legacy costumes). Settings page: settings-add-sys-btn/name/sizes creates a new sizing system (5 rows visible after add), toggle-cat-{id} expands to reveal subcat chips + add-subcat-btn-{catId} + new-subcat-input-{catId} — add worked and delete-subcat-{catId}-{name} chip appeared with toast 'Subcategory added'.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "DELETE /api/categories/{id}/subcategories/{name}", "issue": "Subcategory name containing '/' cannot be deleted via URL-encoded path (%2F is normalized/rejected by Starlette router -> 404). Consider either forbidding '/' in subcategory names at POST, using a query parameter (?name=), or double-decoding. Currently sub names are added freely so users could create an undeletable sub."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Optional (minor): sanitize subcategory names to disallow '/' or accept name via query param in DELETE /api/categories/{id}/subcategories to avoid the %2F router 404."
+  ],
+  "critical_code_review_comments": [
+    "server.py still uses deprecated @app.on_event('startup'/'shutdown'); migrate to FastAPI lifespan.",
+    "server.py uses synchronous requests inside async handlers for object storage; blocks event loop.",
+    "list_costumes: sort=last_used_asc does a Python in-memory re-sort after the DB sort — works but O(n) on 2000 docs; consider pushing null-handling to Mongo aggregation for scale.",
+    "list_categories still synthesizes ghost categories from costume.category values with fresh uuids on every call (id instability). Same feedback as it2.",
+    "CostumeUpdate uses exclude_none=True — this means clients cannot explicitly clear last_year_used back to null (passing null is dropped). If clearing is a UX requirement, switch to model_dump(exclude_unset=True) or a sentinel.",
+    "Subcategory name has no length cap or slash validation — allows users to create names that cannot later be deleted via the current path route.",
+    "SubcategoryPayload has no min length or normalization (case-insensitive dupe check); 'Formal' and 'formal' are treated as distinct."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (dropped obsolete by_size assertions from iteration-2 tests; added iteration-3 tests: sizing-systems CRUD, sizing-system in-use 409, categories subcategories field, subcategory add/delete flow, create/update costume with sizing_system+subcategory+keywords+last_year_used, list filters+sorts+keyword q)"
+  ],
+  "success_rate": {"backend": "100% (31/31)", "frontend": "100% of spec'd testids and flows"},
+  "test_credentials": "N/A (no auth)",
+  "seed_data_creation": "pytest creates/cleans TEST_* costumes/categories/sizing-systems. Frontend E2E left behind: 1 sizing system named 'PW_SYS_*' and 1 subcategory 'PW_SUB_*' on the 'Animal' category (both harmless and deletable via UI).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "backend_test.py at /app/backend/tests/backend_test.py is the regression suite for iterations 1-3 (31 tests, parallel-safe via pytest-xdist). New iteration-3 endpoints: /api/sizing-systems (GET/POST/PUT/DELETE), /api/categories/{id}/subcategories (POST/DELETE). Costume payload accepts arbitrary size keys keyed to sizing_system. Frontend testids match spec 1:1 — CostumeFormDialog uses form-kw-chip-{kw} for chip pill, form-location-preset/form-location-custom (NOT a single form-location), form-subcategory only rendered when the chosen category has subcategories. Detail-last-year and detail-keywords are conditionally rendered (absent on legacy costumes with no keywords/last_year_used). Global search in header submits on Enter (not on typing).",
+  "rca of the issue": "For the %2F subcategory delete failure: Starlette's PathConverter normalizes %2F back to '/', so a subcategory named 'Casual/Wear' gets URL 'DELETE /api/categories/{id}/subcategories/Casual/Wear' which no route matches -> 404. Fix options: (a) reject '/' at POST time (400), (b) rewrite the DELETE endpoint to accept ?name= as a query param, or (c) mount the route on a path:path converter and match name against the collection."
+}

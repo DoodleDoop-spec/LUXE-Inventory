@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { api } from "@/lib/api";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
@@ -14,28 +14,43 @@ import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { Upload, Image as ImageIcon, X, StickyNote, Flag } from "lucide-react";
 
-const SIZES = ["XS", "S", "M", "L", "XL", "XXL", "XXXL"];
-const emptySizes = () => Object.fromEntries(SIZES.map((s) => [s, 0]));
-const emptySizeNotes = () => Object.fromEntries(SIZES.map((s) => [s, ""]));
-
-export default function CostumeFormDialog({ open, onOpenChange, editing, categories, locations, onSaved }) {
+export default function CostumeFormDialog({
+  open, onOpenChange, editing, categories, locations, sizingSystems, onSaved,
+}) {
   const [name, setName] = useState("");
   const [category, setCategory] = useState("");
   const [newCategory, setNewCategory] = useState("");
+  const [subcategory, setSubcategory] = useState("");
+  const [systemName, setSystemName] = useState("Letter");
   const [locMode, setLocMode] = useState("preset");
   const [presetLocation, setPresetLocation] = useState("");
   const [subLocation, setSubLocation] = useState("");
   const [customLocation, setCustomLocation] = useState("");
   const [notes, setNotes] = useState("");
-  const [sizes, setSizes] = useState(emptySizes());
-  const [sizeNotes, setSizeNotes] = useState(emptySizeNotes());
+  const [sizes, setSizes] = useState({});
+  const [sizeNotes, setSizeNotes] = useState({});
   const [openSizeNote, setOpenSizeNote] = useState(null);
   const [imageId, setImageId] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [isFlagged, setIsFlagged] = useState(false);
   const [flagReason, setFlagReason] = useState("");
+  const [lastYearUsed, setLastYearUsed] = useState("");
+  const [keywords, setKeywords] = useState([]);
+  const [kwInput, setKwInput] = useState("");
   const fileRef = useRef(null);
+
+  const currentSystem = useMemo(
+    () => (sizingSystems || []).find((s) => s.name === systemName),
+    [sizingSystems, systemName]
+  );
+  const sizeKeys = currentSystem?.sizes || [];
+
+  const currentCategory = useMemo(
+    () => (categories || []).find((c) => c.name === category),
+    [categories, category]
+  );
+  const availableSubcategories = currentCategory?.subcategories || [];
 
   useEffect(() => {
     if (!open) return;
@@ -43,6 +58,8 @@ export default function CostumeFormDialog({ open, onOpenChange, editing, categor
       setName(editing.name || "");
       setCategory(editing.category || "");
       setNewCategory("");
+      setSubcategory(editing.subcategory || "");
+      setSystemName(editing.sizing_system || "Letter");
       const presetMatch = locations?.find((l) => l.name === editing.location);
       if (presetMatch) {
         setLocMode("preset");
@@ -55,33 +72,69 @@ export default function CostumeFormDialog({ open, onOpenChange, editing, categor
       }
       setSubLocation(editing.sub_location || "");
       setNotes(editing.notes || "");
-      setSizes({ ...emptySizes(), ...(editing.sizes || {}) });
-      setSizeNotes({ ...emptySizeNotes(), ...(editing.size_notes || {}) });
+      setSizes(editing.sizes || {});
+      setSizeNotes(editing.size_notes || {});
       setImageId(editing.image_id || null);
       setIsFlagged(!!editing.is_flagged);
       setFlagReason(editing.flag_reason || "");
+      setLastYearUsed(editing.last_year_used != null ? String(editing.last_year_used) : "");
+      setKeywords(editing.keywords || []);
     } else {
-      setName(""); setCategory(""); setNewCategory("");
+      setName(""); setCategory(""); setNewCategory(""); setSubcategory("");
+      setSystemName("Letter");
       setLocMode("preset"); setPresetLocation(""); setSubLocation(""); setCustomLocation("");
       setNotes("");
-      setSizes(emptySizes());
-      setSizeNotes(emptySizeNotes());
+      setSizes({});
+      setSizeNotes({});
       setImageId(null);
       setIsFlagged(false);
       setFlagReason("");
+      setLastYearUsed("");
+      setKeywords([]);
     }
     setOpenSizeNote(null);
+    setKwInput("");
   }, [open, editing, locations]);
 
-  const total = SIZES.reduce((acc, s) => acc + (Number(sizes[s]) || 0), 0);
+  // Ensure sizes dict has keys aligned with current system
+  useEffect(() => {
+    if (!sizeKeys.length) return;
+    setSizes((prev) => {
+      const next = {};
+      for (const k of sizeKeys) next[k] = Number(prev?.[k] || 0);
+      return next;
+    });
+    setSizeNotes((prev) => {
+      const next = {};
+      for (const k of sizeKeys) next[k] = prev?.[k] || "";
+      return next;
+    });
+  }, [systemName]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const total = sizeKeys.reduce((acc, s) => acc + (Number(sizes[s]) || 0), 0);
+
+  const addKeyword = (raw) => {
+    const parts = raw.split(",").map((p) => p.trim()).filter(Boolean);
+    if (!parts.length) return;
+    setKeywords((prev) => {
+      const seen = new Set(prev.map((p) => p.toLowerCase()));
+      const merged = [...prev];
+      for (const p of parts) {
+        if (!seen.has(p.toLowerCase())) {
+          merged.push(p);
+          seen.add(p.toLowerCase());
+        }
+      }
+      return merged;
+    });
+    setKwInput("");
+  };
+  const removeKeyword = (kw) => setKeywords((prev) => prev.filter((k) => k !== kw));
 
   const handleUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      toast.error("Please select an image file");
-      return;
-    }
+    if (!file.type.startsWith("image/")) { toast.error("Please select an image file"); return; }
     setUploading(true);
     try {
       const fd = new FormData();
@@ -104,6 +157,12 @@ export default function CostumeFormDialog({ open, onOpenChange, editing, categor
     if (!finalCategory) { toast.error("Category is required"); return; }
     if (!finalLocation) { toast.error("Location is required"); return; }
     if (isFlagged && !flagReason.trim()) { toast.error("Flag reason is required"); return; }
+    let lyu = null;
+    if (lastYearUsed.trim()) {
+      const n = parseInt(lastYearUsed, 10);
+      if (isNaN(n) || n < 1800 || n > 2200) { toast.error("Last year used must be a valid year"); return; }
+      lyu = n;
+    }
 
     setSaving(true);
     try {
@@ -113,11 +172,15 @@ export default function CostumeFormDialog({ open, onOpenChange, editing, categor
       const payload = {
         name: name.trim(),
         category: finalCategory,
+        subcategory: subcategory.trim(),
         location: finalLocation,
         sub_location: locMode === "preset" ? subLocation.trim() : "",
         notes: notes.trim(),
-        sizes: Object.fromEntries(SIZES.map((s) => [s, Number(sizes[s]) || 0])),
-        size_notes: Object.fromEntries(SIZES.map((s) => [s, (sizeNotes[s] || "").trim()])),
+        sizing_system: systemName,
+        sizes: Object.fromEntries(sizeKeys.map((s) => [s, Number(sizes[s]) || 0])),
+        size_notes: Object.fromEntries(sizeKeys.map((s) => [s, (sizeNotes[s] || "").trim()])),
+        keywords,
+        last_year_used: lyu,
         image_id: imageId,
         is_flagged: isFlagged,
         flag_reason: isFlagged ? flagReason.trim() : "",
@@ -145,7 +208,7 @@ export default function CostumeFormDialog({ open, onOpenChange, editing, categor
             {editing ? "Edit Costume" : "Add Costume"}
           </DialogTitle>
           <DialogDescription className="text-[#71717A]">
-            Fill out costume details, set quantities per size, and optionally upload a photo.
+            Fill out costume details, choose a sizing system, and set quantities.
           </DialogDescription>
         </DialogHeader>
 
@@ -165,7 +228,7 @@ export default function CostumeFormDialog({ open, onOpenChange, editing, categor
             </div>
             <div className="space-y-2">
               <Label className="eyebrow">CATEGORY *</Label>
-              <Select value={category} onValueChange={setCategory}>
+              <Select value={category} onValueChange={(v) => { setCategory(v); setSubcategory(""); }}>
                 <SelectTrigger data-testid="form-category" className="rounded-none border-[#E4E4E7] h-11">
                   <SelectValue placeholder="Select category" />
                 </SelectTrigger>
@@ -187,6 +250,24 @@ export default function CostumeFormDialog({ open, onOpenChange, editing, categor
               )}
             </div>
           </div>
+
+          {/* Subcategory */}
+          {category && category !== "__new__" && availableSubcategories.length > 0 && (
+            <div className="space-y-2">
+              <Label className="eyebrow">SUBCATEGORY</Label>
+              <Select value={subcategory || "__none__"} onValueChange={(v) => setSubcategory(v === "__none__" ? "" : v)}>
+                <SelectTrigger data-testid="form-subcategory" className="rounded-none border-[#E4E4E7] h-11 max-w-md">
+                  <SelectValue placeholder="Select subcategory (optional)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">— None —</SelectItem>
+                  {availableSubcategories.map((s) => (
+                    <SelectItem key={s} value={s}>{s}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
           {/* Location */}
           <div className="space-y-2">
@@ -238,30 +319,43 @@ export default function CostumeFormDialog({ open, onOpenChange, editing, categor
                 className="rounded-none border-[#E4E4E7] h-11"
               />
             )}
-            {locMode === "preset" && subLocation.trim() && presetLocation && (
-              <p className="text-xs text-[#71717A]">Will be stored as: <span className="text-[#09090B] font-medium">{presetLocation} · {subLocation.trim()}</span></p>
-            )}
           </div>
 
-          {/* Sizes */}
+          {/* Sizing system + sizes */}
           <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <Label className="eyebrow">QUANTITY PER SIZE</Label>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-3">
+                <Label className="eyebrow">SIZING SYSTEM</Label>
+                <Select value={systemName} onValueChange={setSystemName}>
+                  <SelectTrigger data-testid="form-sizing-system" className="rounded-none border-[#E4E4E7] h-9 min-w-[200px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(sizingSystems || []).map((s) => (
+                      <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="text-sm text-[#71717A]">
                 Total: <span className="font-semibold text-[#09090B] tabular-nums" data-testid="form-total">{total}</span>
               </div>
             </div>
-            <div className="grid grid-cols-4 sm:grid-cols-7 gap-px bg-[#E4E4E7] border border-[#E4E4E7]">
-              {SIZES.map((s) => {
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-px bg-[#E4E4E7] border border-[#E4E4E7]">
+              {sizeKeys.length === 0 ? (
+                <div className="bg-white p-4 col-span-full text-center text-sm text-[#71717A]">
+                  Select a sizing system to enter sizes.
+                </div>
+              ) : sizeKeys.map((s) => {
                 const hasNote = (sizeNotes[s] || "").trim().length > 0;
                 return (
-                  <div key={s} className="bg-white p-3 relative">
+                  <div key={s} className="bg-white p-3">
                     <div className="font-mono-label text-[10px] text-[#71717A] text-center mb-1">{s}</div>
                     <Input
                       data-testid={`form-size-${s}`}
                       type="number"
                       min="0"
-                      value={sizes[s]}
+                      value={sizes[s] ?? 0}
                       onChange={(e) => setSizes({ ...sizes, [s]: Math.max(0, Number(e.target.value) || 0) })}
                       className="rounded-none border-[#E4E4E7] h-10 text-center tabular-nums"
                     />
@@ -305,6 +399,55 @@ export default function CostumeFormDialog({ open, onOpenChange, editing, categor
                 />
               </div>
             )}
+          </div>
+
+          {/* Last year used + Keywords */}
+          <div className="grid md:grid-cols-2 gap-5">
+            <div className="space-y-2">
+              <Label className="eyebrow">LAST YEAR USED</Label>
+              <Input
+                data-testid="form-last-year"
+                type="number"
+                min="1800"
+                max="2200"
+                value={lastYearUsed}
+                onChange={(e) => setLastYearUsed(e.target.value)}
+                placeholder="e.g. 2024"
+                className="rounded-none border-[#E4E4E7] h-11"
+              />
+              <p className="text-xs text-[#A1A1AA]">Leave blank if never used or unknown.</p>
+            </div>
+            <div className="space-y-2">
+              <Label className="eyebrow">KEYWORDS</Label>
+              <div className="border border-[#E4E4E7] min-h-11 flex items-center flex-wrap gap-1 px-2 py-1.5">
+                {keywords.map((kw) => (
+                  <span key={kw} className="inline-flex items-center gap-1 bg-[#F4F4F5] border border-[#E4E4E7] px-2 py-0.5 text-xs" data-testid={`form-kw-chip-${kw}`}>
+                    {kw}
+                    <button type="button" onClick={() => removeKeyword(kw)} className="text-[#71717A] hover:text-[#09090B]" aria-label={`Remove ${kw}`}>
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+                <input
+                  type="text"
+                  data-testid="form-kw-input"
+                  value={kwInput}
+                  onChange={(e) => setKwInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === ",") {
+                      e.preventDefault();
+                      addKeyword(kwInput);
+                    } else if (e.key === "Backspace" && !kwInput && keywords.length) {
+                      setKeywords(keywords.slice(0, -1));
+                    }
+                  }}
+                  onBlur={() => kwInput.trim() && addKeyword(kwInput)}
+                  placeholder={keywords.length ? "" : "e.g. red, sequin, elizabethan"}
+                  className="flex-1 min-w-[100px] text-sm focus:outline-none py-1"
+                />
+              </div>
+              <p className="text-xs text-[#A1A1AA]">Press Enter or comma to add. Backspace removes the last.</p>
+            </div>
           </div>
 
           {/* Flag */}

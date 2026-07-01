@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { api } from "@/lib/api";
-import { Plus, Search, LayoutGrid, List, X, MapPin, ChevronRight, Flag, StickyNote } from "lucide-react";
+import { Plus, Search, LayoutGrid, List, X, MapPin, ChevronRight, Flag, StickyNote, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -11,7 +11,6 @@ import { Badge } from "@/components/ui/badge";
 import CostumeFormDialog from "@/components/CostumeFormDialog";
 import { toast } from "sonner";
 
-const SIZES = ["XS", "S", "M", "L", "XL", "XXL", "XXXL"];
 const ALL = "__all__";
 
 export default function Inventory() {
@@ -21,16 +20,19 @@ export default function Inventory() {
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState([]);
   const [locations, setLocations] = useState([]);
+  const [sizingSystems, setSizingSystems] = useState([]);
   const [q, setQ] = useState("");
   const [category, setCategory] = useState(ALL);
+  const [subcategory, setSubcategory] = useState(ALL);
+  const [systemFilter, setSystemFilter] = useState(ALL);
   const [loc, setLoc] = useState(ALL);
   const [size, setSize] = useState(ALL);
   const [flaggedOnly, setFlaggedOnly] = useState(false);
+  const [sort, setSort] = useState("updated_desc");
   const [view, setView] = useState("grid");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState(null);
 
-  // Fetch default view from settings once
   useEffect(() => {
     (async () => {
       try {
@@ -40,23 +42,51 @@ export default function Inventory() {
     })();
   }, []);
 
+  // Sync q from URL (from header global search or Dashboard link)
+  useEffect(() => {
+    const sp = new URLSearchParams(location.search);
+    const urlQ = sp.get("q") || "";
+    setQ(urlQ);
+    if (sp.get("new") === "1") {
+      setEditing(null);
+      setDialogOpen(true);
+      // strip params
+      navigate("/inventory" + (urlQ ? `?q=${encodeURIComponent(urlQ)}` : ""), { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
+
+  const currentCategory = useMemo(
+    () => categories.find((c) => c.name === category),
+    [categories, category]
+  );
+  const currentSystem = useMemo(
+    () => sizingSystems.find((s) => s.name === systemFilter),
+    [sizingSystems, systemFilter]
+  );
+
   const fetchAll = async () => {
     setLoading(true);
     try {
       const params = {};
       if (q.trim()) params.q = q.trim();
       if (category !== ALL) params.category = category;
+      if (subcategory !== ALL) params.subcategory = subcategory;
       if (loc !== ALL) params.location = loc;
       if (size !== ALL) params.size = size;
+      if (systemFilter !== ALL) params.sizing_system = systemFilter;
       if (flaggedOnly) params.flagged = true;
-      const [c, cats, locs] = await Promise.all([
+      if (sort && sort !== "updated_desc") params.sort = sort;
+      const [c, cats, locs, systems] = await Promise.all([
         api.get("/costumes", { params }),
         api.get("/categories"),
         api.get("/locations"),
+        api.get("/sizing-systems"),
       ]);
       setCostumes(c.data);
       setCategories(cats.data);
       setLocations(locs.data);
+      setSizingSystems(systems.data);
     } catch (e) {
       console.error(e);
       toast.error("Failed to load inventory");
@@ -67,23 +97,13 @@ export default function Inventory() {
   useEffect(() => {
     fetchAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [category, loc, size, flaggedOnly]);
+  }, [category, subcategory, loc, size, systemFilter, flaggedOnly, sort]);
 
   useEffect(() => {
     const t = setTimeout(() => fetchAll(), 300);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
-
-  useEffect(() => {
-    const sp = new URLSearchParams(location.search);
-    if (sp.get("new") === "1") {
-      setEditing(null);
-      setDialogOpen(true);
-      navigate("/inventory", { replace: true });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.search]);
 
   const handleNew = () => { setEditing(null); setDialogOpen(true); };
   const handleEdit = (c) => { setEditing(c); setDialogOpen(true); };
@@ -102,12 +122,20 @@ export default function Inventory() {
   const handleSaved = () => { setDialogOpen(false); fetchAll(); };
 
   const filterCount = useMemo(() => {
-    return (q ? 1 : 0) + (category !== ALL ? 1 : 0) + (loc !== ALL ? 1 : 0) + (size !== ALL ? 1 : 0) + (flaggedOnly ? 1 : 0);
-  }, [q, category, loc, size, flaggedOnly]);
+    return (q ? 1 : 0) + (category !== ALL ? 1 : 0) + (subcategory !== ALL ? 1 : 0)
+      + (loc !== ALL ? 1 : 0) + (size !== ALL ? 1 : 0) + (systemFilter !== ALL ? 1 : 0)
+      + (flaggedOnly ? 1 : 0);
+  }, [q, category, subcategory, loc, size, systemFilter, flaggedOnly]);
 
   const clearFilters = () => {
-    setQ(""); setCategory(ALL); setLoc(ALL); setSize(ALL); setFlaggedOnly(false);
+    setQ(""); setCategory(ALL); setSubcategory(ALL); setSystemFilter(ALL);
+    setLoc(ALL); setSize(ALL); setFlaggedOnly(false); setSort("updated_desc");
   };
+
+  // When system filter changes, restrict size list to that system's sizes
+  const sizeOptions = currentSystem?.sizes || [
+    ...new Set(sizingSystems.flatMap((s) => s.sizes)),
+  ];
 
   return (
     <div className="space-y-8" data-testid="inventory-page">
@@ -147,18 +175,18 @@ export default function Inventory() {
       {/* Filter bar */}
       <div className="border border-[#E4E4E7] p-4 md:p-5 space-y-3">
         <div className="grid md:grid-cols-12 gap-3">
-          <div className="md:col-span-5 relative">
+          <div className="md:col-span-4 relative">
             <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#71717A]" />
             <Input
               data-testid="search-input"
-              placeholder="Search by name, category, location…"
+              placeholder="Search by name, category, keywords…"
               value={q}
               onChange={(e) => setQ(e.target.value)}
               className="pl-10 h-11 rounded-none border-[#E4E4E7]"
             />
           </div>
           <div className="md:col-span-2">
-            <Select value={category} onValueChange={setCategory}>
+            <Select value={category} onValueChange={(v) => { setCategory(v); setSubcategory(ALL); }}>
               <SelectTrigger data-testid="filter-category" className="h-11 rounded-none border-[#E4E4E7]">
                 <SelectValue placeholder="Category" />
               </SelectTrigger>
@@ -170,7 +198,20 @@ export default function Inventory() {
               </SelectContent>
             </Select>
           </div>
-          <div className="md:col-span-3">
+          <div className="md:col-span-2">
+            <Select value={subcategory} onValueChange={setSubcategory} disabled={!currentCategory?.subcategories?.length}>
+              <SelectTrigger data-testid="filter-subcategory" className="h-11 rounded-none border-[#E4E4E7]">
+                <SelectValue placeholder="Subcategory" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>All subcategories</SelectItem>
+                {(currentCategory?.subcategories || []).map((s) => (
+                  <SelectItem key={s} value={s}>{s}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="md:col-span-2">
             <Select value={loc} onValueChange={setLoc}>
               <SelectTrigger data-testid="filter-location" className="h-11 rounded-none border-[#E4E4E7]">
                 <SelectValue placeholder="Location" />
@@ -184,38 +225,69 @@ export default function Inventory() {
             </Select>
           </div>
           <div className="md:col-span-2">
-            <Select value={size} onValueChange={setSize}>
-              <SelectTrigger data-testid="filter-size" className="h-11 rounded-none border-[#E4E4E7]">
-                <SelectValue placeholder="Size available" />
+            <Select value={systemFilter} onValueChange={(v) => { setSystemFilter(v); setSize(ALL); }}>
+              <SelectTrigger data-testid="filter-sizing-system" className="h-11 rounded-none border-[#E4E4E7]">
+                <SelectValue placeholder="Sizing system" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={ALL}>Any size</SelectItem>
-                {SIZES.map((s) => (
-                  <SelectItem key={s} value={s}>Size {s}</SelectItem>
+                <SelectItem value={ALL}>All systems</SelectItem>
+                {sizingSystems.map((s) => (
+                  <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
         </div>
-        <div className="flex items-center justify-between flex-wrap gap-2">
-          <button
-            type="button"
-            data-testid="filter-flagged-btn"
-            onClick={() => setFlaggedOnly(!flaggedOnly)}
-            className={`inline-flex items-center gap-1.5 text-xs px-3 py-1.5 border ${flaggedOnly ? "bg-[#EF4444] text-white border-[#EF4444]" : "bg-white text-[#09090B] border-[#E4E4E7]"}`}
-          >
-            <Flag className="h-3 w-3" fill={flaggedOnly ? "currentColor" : "none"} />
-            Flagged only
-          </button>
-          {filterCount > 0 && (
+
+        <div className="grid md:grid-cols-12 gap-3">
+          <div className="md:col-span-3">
+            <Select value={size} onValueChange={setSize}>
+              <SelectTrigger data-testid="filter-size" className="h-10 rounded-none border-[#E4E4E7]">
+                <SelectValue placeholder="Size available" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>Any size</SelectItem>
+                {sizeOptions.map((s) => (
+                  <SelectItem key={s} value={s}>Size {s}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="md:col-span-3">
+            <Select value={sort} onValueChange={setSort}>
+              <SelectTrigger data-testid="sort-select" className="h-10 rounded-none border-[#E4E4E7]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="updated_desc">Recently updated</SelectItem>
+                <SelectItem value="last_used_asc">Last year used ↑ (oldest first)</SelectItem>
+                <SelectItem value="last_used_desc">Last year used ↓ (newest first)</SelectItem>
+                <SelectItem value="name_asc">Name A → Z</SelectItem>
+                <SelectItem value="total_desc">Total qty ↓</SelectItem>
+                <SelectItem value="system_size">Sizing system, then name</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="md:col-span-6 flex items-center gap-2 flex-wrap justify-end">
             <button
-              data-testid="clear-filters-btn"
-              onClick={clearFilters}
-              className="inline-flex items-center gap-1 text-xs text-[#71717A] hover:text-[#09090B]"
+              type="button"
+              data-testid="filter-flagged-btn"
+              onClick={() => setFlaggedOnly(!flaggedOnly)}
+              className={`inline-flex items-center gap-1.5 text-xs px-3 py-1.5 border ${flaggedOnly ? "bg-[#EF4444] text-white border-[#EF4444]" : "bg-white text-[#09090B] border-[#E4E4E7]"}`}
             >
-              <X className="h-3 w-3" /> Clear {filterCount} filter{filterCount > 1 ? "s" : ""}
+              <Flag className="h-3 w-3" fill={flaggedOnly ? "currentColor" : "none"} />
+              Flagged only
             </button>
-          )}
+            {filterCount > 0 && (
+              <button
+                data-testid="clear-filters-btn"
+                onClick={clearFilters}
+                className="inline-flex items-center gap-1 text-xs text-[#71717A] hover:text-[#09090B]"
+              >
+                <X className="h-3 w-3" /> Clear {filterCount} filter{filterCount > 1 ? "s" : ""}
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -236,11 +308,11 @@ export default function Inventory() {
       ) : view === "grid" ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-px bg-[#E4E4E7] border border-[#E4E4E7]">
           {costumes.map((c) => (
-            <CostumeCard key={c.id} costume={c} onEdit={handleEdit} onDelete={handleDelete} />
+            <CostumeCard key={c.id} costume={c} onEdit={handleEdit} onDelete={handleDelete} sizingSystems={sizingSystems} />
           ))}
         </div>
       ) : (
-        <CostumeTable costumes={costumes} onEdit={handleEdit} onDelete={handleDelete} />
+        <CostumeTable costumes={costumes} onEdit={handleEdit} onDelete={handleDelete} sizingSystems={sizingSystems} />
       )}
 
       <CostumeFormDialog
@@ -249,14 +321,23 @@ export default function Inventory() {
         editing={editing}
         categories={categories}
         locations={locations}
+        sizingSystems={sizingSystems}
         onSaved={handleSaved}
       />
     </div>
   );
 }
 
-function CostumeCard({ costume, onEdit, onDelete }) {
-  const anySizeNote = SIZES.some((s) => (costume.size_notes?.[s] || "").trim());
+function sizeSummary(costume, sizingSystems) {
+  const sys = sizingSystems.find((s) => s.name === (costume.sizing_system || "Letter"));
+  const keys = sys?.sizes || Object.keys(costume.sizes || {});
+  return keys.filter((k) => (costume.sizes?.[k] || 0) > 0).map((k) => `${k}·${costume.sizes[k]}`).join("  ");
+}
+
+function CostumeCard({ costume, onEdit, onDelete, sizingSystems }) {
+  const sys = sizingSystems.find((s) => s.name === (costume.sizing_system || "Letter"));
+  const sizeKeys = sys?.sizes || Object.keys(costume.sizes || {});
+  const anySizeNote = sizeKeys.some((s) => (costume.size_notes?.[s] || "").trim());
   return (
     <div className="bg-white p-5 group hover:bg-[#FAFAFA] transition-colors flex flex-col" data-testid={`costume-card-${costume.id}`}>
       <Link to={`/costume/${costume.id}`} className="block">
@@ -274,11 +355,20 @@ function CostumeCard({ costume, onEdit, onDelete }) {
               <span className="text-[10px] font-mono-label">FLAGGED</span>
             </div>
           )}
+          {costume.last_year_used && (
+            <div className="absolute bottom-2 left-2 bg-white/95 border border-[#E4E4E7] px-2 py-0.5 flex items-center gap-1" data-testid={`year-badge-${costume.id}`}>
+              <Calendar className="h-3 w-3 text-[#09090B]" />
+              <span className="text-[10px] font-mono-label text-[#09090B]">{costume.last_year_used}</span>
+            </div>
+          )}
         </div>
       </Link>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <div className="eyebrow truncate">{costume.category}</div>
+          <div className="eyebrow truncate">
+            {costume.category}
+            {costume.subcategory ? <span className="text-[#09090B] normal-case tracking-normal"> · {costume.subcategory}</span> : null}
+          </div>
           <Link to={`/costume/${costume.id}`}>
             <h3 className="font-display font-semibold text-lg text-[#09090B] truncate mt-1 hover:underline">
               {costume.name}
@@ -296,18 +386,30 @@ function CostumeCard({ costume, onEdit, onDelete }) {
           <div className="eyebrow text-[9px]">UNITS</div>
         </div>
       </div>
-      <div className="flex gap-1 mt-4 flex-wrap">
-        {SIZES.map((s) => {
-          const qty = costume.sizes?.[s] || 0;
-          const hasNote = (costume.size_notes?.[s] || "").trim().length > 0;
-          return (
-            <Badge key={s} variant="outline" className={`rounded-none border ${qty > 0 ? "border-[#09090B] text-[#09090B]" : "border-[#E4E4E7] text-[#A1A1AA]"}`}>
-              <span className="font-mono-label text-[10px]">{s}</span>
-              <span className="tabular-nums text-[10px] ml-1">{qty}</span>
-              {hasNote && <StickyNote className="h-2.5 w-2.5 ml-0.5" />}
-            </Badge>
-          );
-        })}
+      {(costume.keywords || []).length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-3" data-testid={`kw-list-${costume.id}`}>
+          {costume.keywords.slice(0, 6).map((k) => (
+            <span key={k} className="text-[10px] px-1.5 py-0.5 bg-[#F4F4F5] text-[#52525B] border border-[#E4E4E7]">
+              {k}
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="mt-3">
+        <div className="eyebrow text-[9px] mb-1.5">{costume.sizing_system || "Letter"}</div>
+        <div className="flex gap-1 flex-wrap">
+          {sizeKeys.map((s) => {
+            const qty = costume.sizes?.[s] || 0;
+            const hasNote = (costume.size_notes?.[s] || "").trim().length > 0;
+            return (
+              <Badge key={s} variant="outline" className={`rounded-none border ${qty > 0 ? "border-[#09090B] text-[#09090B]" : "border-[#E4E4E7] text-[#A1A1AA]"}`}>
+                <span className="font-mono-label text-[10px]">{s}</span>
+                <span className="tabular-nums text-[10px] ml-1">{qty}</span>
+                {hasNote && <StickyNote className="h-2.5 w-2.5 ml-0.5" />}
+              </Badge>
+            );
+          })}
+        </div>
       </div>
       {anySizeNote && (
         <div className="text-[10px] font-mono-label text-[#71717A] mt-2 flex items-center gap-1">
@@ -342,7 +444,7 @@ function CostumeCard({ costume, onEdit, onDelete }) {
   );
 }
 
-function CostumeTable({ costumes, onEdit, onDelete }) {
+function CostumeTable({ costumes, onEdit, onDelete, sizingSystems }) {
   return (
     <div className="border border-[#E4E4E7] overflow-x-auto" data-testid="costume-table">
       <table className="w-full text-sm">
@@ -351,7 +453,9 @@ function CostumeTable({ costumes, onEdit, onDelete }) {
             <th className="px-4 py-3 eyebrow">Name</th>
             <th className="px-4 py-3 eyebrow">Category</th>
             <th className="px-4 py-3 eyebrow">Location</th>
-            {SIZES.map((s) => <th key={s} className="px-2 py-3 eyebrow text-center">{s}</th>)}
+            <th className="px-4 py-3 eyebrow">System</th>
+            <th className="px-4 py-3 eyebrow">Sizes</th>
+            <th className="px-4 py-3 eyebrow text-center">Last used</th>
             <th className="px-4 py-3 eyebrow text-right">Total</th>
             <th className="px-4 py-3 eyebrow text-right">Actions</th>
           </tr>
@@ -365,13 +469,15 @@ function CostumeTable({ costumes, onEdit, onDelete }) {
                   <Link to={`/costume/${c.id}`} className="font-medium text-[#09090B] hover:underline truncate">{c.name}</Link>
                 </div>
               </td>
-              <td className="px-4 py-3 text-[#52525B]">{c.category}</td>
+              <td className="px-4 py-3 text-[#52525B]">
+                {c.category}{c.subcategory ? ` · ${c.subcategory}` : ""}
+              </td>
               <td className="px-4 py-3 text-[#52525B]">
                 {c.location}{c.sub_location ? ` · ${c.sub_location}` : ""}
               </td>
-              {SIZES.map((s) => (
-                <td key={s} className="px-2 py-3 text-center tabular-nums">{c.sizes?.[s] || 0}</td>
-              ))}
+              <td className="px-4 py-3 text-[#52525B]">{c.sizing_system || "Letter"}</td>
+              <td className="px-4 py-3 text-[#52525B] font-mono-label text-xs whitespace-nowrap">{sizeSummary(c, sizingSystems) || "—"}</td>
+              <td className="px-4 py-3 text-center tabular-nums text-[#52525B]" data-testid={`row-year-${c.id}`}>{c.last_year_used || "—"}</td>
               <td className="px-4 py-3 text-right font-semibold tabular-nums">{c.total_quantity}</td>
               <td className="px-4 py-3 text-right">
                 <button onClick={() => onEdit(c)} data-testid={`row-edit-${c.id}`} className="text-xs font-medium text-[#09090B] hover:underline mr-3">Edit</button>

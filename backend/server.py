@@ -106,17 +106,26 @@ api_router = APIRouter(prefix="/api")
 
 
 # --------- Models ---------
-SIZE_KEYS = ["XS", "S", "M", "L", "XL", "XXL", "XXXL"]
+DEFAULT_SIZING_SYSTEMS = [
+    {"name": "Letter", "sizes": ["XS", "S", "M", "L", "XL", "XXL", "XXXL"]},
+    {"name": "Number (Even)", "sizes": ["0", "2", "4", "6", "8", "10", "12", "14", "16", "18", "20", "22", "24", "26", "28", "30"]},
+    {"name": "Tall", "sizes": ["4T", "6T", "8T", "10T", "12T", "14T", "16T"]},
+    {"name": "Petite", "sizes": ["4P", "6P", "8P", "10P", "12P", "14P", "16P"]},
+]
 
 
 class CostumeBase(BaseModel):
     name: str
     category: str
+    subcategory: Optional[str] = ""
     location: str
     sub_location: Optional[str] = ""
     notes: Optional[str] = ""
-    sizes: Dict[str, int] = Field(default_factory=lambda: {k: 0 for k in SIZE_KEYS})
-    size_notes: Dict[str, str] = Field(default_factory=lambda: {k: "" for k in SIZE_KEYS})
+    sizing_system: Optional[str] = "Letter"
+    sizes: Dict[str, int] = Field(default_factory=dict)
+    size_notes: Dict[str, str] = Field(default_factory=dict)
+    keywords: List[str] = Field(default_factory=list)
+    last_year_used: Optional[int] = None
 
 
 class CostumeCreate(CostumeBase):
@@ -128,11 +137,15 @@ class CostumeCreate(CostumeBase):
 class CostumeUpdate(BaseModel):
     name: Optional[str] = None
     category: Optional[str] = None
+    subcategory: Optional[str] = None
     location: Optional[str] = None
     sub_location: Optional[str] = None
     notes: Optional[str] = None
+    sizing_system: Optional[str] = None
     sizes: Optional[Dict[str, int]] = None
     size_notes: Optional[Dict[str, str]] = None
+    keywords: Optional[List[str]] = None
+    last_year_used: Optional[int] = None
     image_id: Optional[str] = None
     is_flagged: Optional[bool] = None
     flag_reason: Optional[str] = None
@@ -147,11 +160,15 @@ class Costume(BaseModel):
     id: str
     name: str
     category: str
+    subcategory: str = ""
     location: str
     sub_location: str = ""
     notes: str = ""
+    sizing_system: str = "Letter"
     sizes: Dict[str, int]
     size_notes: Dict[str, str] = Field(default_factory=dict)
+    keywords: List[str] = Field(default_factory=list)
+    last_year_used: Optional[int] = None
     total_quantity: int
     image_id: Optional[str] = None
     is_flagged: bool = False
@@ -159,6 +176,23 @@ class Costume(BaseModel):
     flagged_at: Optional[str] = None
     created_at: str
     updated_at: str
+
+
+class SizingSystem(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    name: str
+    sizes: List[str]
+    created_at: str
+
+
+class SizingSystemPayload(BaseModel):
+    name: str
+    sizes: List[str]
+
+
+class SubcategoryPayload(BaseModel):
+    name: str
 
 
 class LocationItem(BaseModel):
@@ -193,17 +227,12 @@ async def get_stats():
     total_items = sum(c.get("total_quantity", 0) for c in costumes)
     categories = sorted({c.get("category", "") for c in costumes if c.get("category")})
     locations_in_use = sorted({c.get("location", "") for c in costumes if c.get("location")})
-    by_size = {k: 0 for k in SIZE_KEYS}
-    for c in costumes:
-        for k in SIZE_KEYS:
-            by_size[k] += int((c.get("sizes") or {}).get(k, 0))
     return {
         "total_costumes": total_costumes,
         "total_items": total_items,
         "categories": categories,
         "category_count": len(categories),
         "locations_in_use": locations_in_use,
-        "by_size": by_size,
         "flagged_count": sum(1 for c in costumes if c.get("is_flagged")),
     }
 
@@ -212,28 +241,53 @@ async def get_stats():
 async def list_costumes(
     q: Optional[str] = None,
     category: Optional[str] = None,
+    subcategory: Optional[str] = None,
     location: Optional[str] = None,
     size: Optional[str] = None,
+    sizing_system: Optional[str] = None,
     flagged: Optional[bool] = None,
+    sort: Optional[str] = None,
 ):
     query: Dict = {}
     if q:
         query["$or"] = [
             {"name": {"$regex": q, "$options": "i"}},
             {"category": {"$regex": q, "$options": "i"}},
+            {"subcategory": {"$regex": q, "$options": "i"}},
             {"location": {"$regex": q, "$options": "i"}},
             {"sub_location": {"$regex": q, "$options": "i"}},
             {"notes": {"$regex": q, "$options": "i"}},
+            {"keywords": {"$regex": q, "$options": "i"}},
         ]
     if category:
         query["category"] = category
+    if subcategory:
+        query["subcategory"] = subcategory
     if location:
         query["location"] = location
-    if size and size in SIZE_KEYS:
+    if size:
         query[f"sizes.{size}"] = {"$gt": 0}
+    if sizing_system:
+        query["sizing_system"] = sizing_system
     if flagged is not None:
         query["is_flagged"] = flagged
-    docs = await db.costumes.find(query, {"_id": 0}).sort("updated_at", -1).to_list(2000)
+    # Sorting
+    sort_spec = [("updated_at", -1)]
+    if sort == "last_used_asc":
+        # low year to high year; costumes without last_year_used sink to end
+        sort_spec = [("last_year_used", 1), ("updated_at", -1)]
+    elif sort == "last_used_desc":
+        sort_spec = [("last_year_used", -1), ("updated_at", -1)]
+    elif sort == "name_asc":
+        sort_spec = [("name", 1)]
+    elif sort == "total_desc":
+        sort_spec = [("total_quantity", -1)]
+    elif sort == "system_size":
+        sort_spec = [("sizing_system", 1), ("name", 1)]
+    docs = await db.costumes.find(query, {"_id": 0}).sort(sort_spec).to_list(2000)
+    # If ascending last_used, push null values to the end
+    if sort == "last_used_asc":
+        docs.sort(key=lambda d: (d.get("last_year_used") is None, d.get("last_year_used") or 0))
     return docs
 
 
@@ -248,17 +302,22 @@ async def get_costume(costume_id: str):
 @api_router.post("/costumes", response_model=Costume)
 async def create_costume(payload: CostumeCreate):
     now = _now_iso()
-    sizes = {k: int(payload.sizes.get(k, 0)) for k in SIZE_KEYS}
-    size_notes = {k: str((payload.size_notes or {}).get(k, "") or "") for k in SIZE_KEYS}
+    sizes = {str(k): int(v or 0) for k, v in (payload.sizes or {}).items()}
+    size_notes = {str(k): str(v or "") for k, v in (payload.size_notes or {}).items()}
+    keywords = [k.strip() for k in (payload.keywords or []) if k and k.strip()]
     doc = {
         "id": str(uuid.uuid4()),
         "name": payload.name.strip(),
         "category": payload.category.strip(),
+        "subcategory": (payload.subcategory or "").strip(),
         "location": payload.location.strip(),
         "sub_location": (payload.sub_location or "").strip(),
         "notes": (payload.notes or "").strip(),
+        "sizing_system": (payload.sizing_system or "Letter").strip(),
         "sizes": sizes,
         "size_notes": size_notes,
+        "keywords": keywords,
+        "last_year_used": payload.last_year_used,
         "total_quantity": _compute_total(sizes),
         "image_id": payload.image_id,
         "is_flagged": bool(payload.is_flagged),
@@ -279,11 +338,13 @@ async def update_costume(costume_id: str, payload: CostumeUpdate):
         raise HTTPException(status_code=404, detail="Costume not found")
     updates = {k: v for k, v in payload.model_dump(exclude_none=True).items()}
     if "sizes" in updates:
-        sizes = {k: int(updates["sizes"].get(k, 0)) for k in SIZE_KEYS}
+        sizes = {str(k): int(v or 0) for k, v in (updates["sizes"] or {}).items()}
         updates["sizes"] = sizes
         updates["total_quantity"] = _compute_total(sizes)
     if "size_notes" in updates:
-        updates["size_notes"] = {k: str(updates["size_notes"].get(k, "") or "") for k in SIZE_KEYS}
+        updates["size_notes"] = {str(k): str(v or "") for k, v in (updates["size_notes"] or {}).items()}
+    if "keywords" in updates:
+        updates["keywords"] = [k.strip() for k in (updates["keywords"] or []) if k and k.strip()]
     if "is_flagged" in updates:
         if updates["is_flagged"]:
             updates["flagged_at"] = _now_iso()
@@ -381,11 +442,13 @@ async def delete_location(location_id: str):
 @api_router.get("/categories")
 async def list_categories():
     docs = await db.categories.find({}, {"_id": 0}).sort("name", 1).to_list(500)
+    for d in docs:
+        d.setdefault("subcategories", [])
     existing = {d["name"] for d in docs}
     used = await db.costumes.distinct("category")
     for u in used:
         if u and u not in existing:
-            docs.append({"id": str(uuid.uuid4()), "name": u, "created_at": _now_iso()})
+            docs.append({"id": str(uuid.uuid4()), "name": u, "subcategories": [], "created_at": _now_iso()})
             existing.add(u)
     return sorted(docs, key=lambda x: x["name"].lower())
 
@@ -415,6 +478,85 @@ async def delete_category(category_id: str):
     if in_use > 0:
         raise HTTPException(status_code=409, detail=f"Category is used by {in_use} costume(s)")
     await db.categories.delete_one({"id": category_id})
+    return {"ok": True}
+
+
+@api_router.post("/categories/{category_id}/subcategories")
+async def add_subcategory(category_id: str, payload: SubcategoryPayload):
+    doc = await db.categories.find_one({"id": category_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Category not found")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Subcategory name required")
+    subs = doc.get("subcategories") or []
+    if name in subs:
+        raise HTTPException(status_code=409, detail="Subcategory already exists")
+    subs.append(name)
+    await db.categories.update_one({"id": category_id}, {"$set": {"subcategories": subs}})
+    updated = await db.categories.find_one({"id": category_id}, {"_id": 0})
+    return updated
+
+
+@api_router.delete("/categories/{category_id}/subcategories/{sub_name}")
+async def delete_subcategory(category_id: str, sub_name: str):
+    doc = await db.categories.find_one({"id": category_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Category not found")
+    subs = [s for s in (doc.get("subcategories") or []) if s != sub_name]
+    await db.categories.update_one({"id": category_id}, {"$set": {"subcategories": subs}})
+    return {"ok": True}
+
+
+# --------- Sizing Systems Routes ---------
+@api_router.get("/sizing-systems", response_model=List[SizingSystem])
+async def list_sizing_systems():
+    docs = await db.sizing_systems.find({}, {"_id": 0}).sort("name", 1).to_list(200)
+    return docs
+
+
+@api_router.post("/sizing-systems", response_model=SizingSystem)
+async def create_sizing_system(payload: SizingSystemPayload):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name required")
+    sizes = [s.strip() for s in (payload.sizes or []) if s and s.strip()]
+    if not sizes:
+        raise HTTPException(status_code=400, detail="At least one size required")
+    existing = await db.sizing_systems.find_one({"name": name})
+    if existing:
+        raise HTTPException(status_code=409, detail="Sizing system already exists")
+    doc = {"id": str(uuid.uuid4()), "name": name, "sizes": sizes, "created_at": _now_iso()}
+    await db.sizing_systems.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.put("/sizing-systems/{system_id}", response_model=SizingSystem)
+async def update_sizing_system(system_id: str, payload: SizingSystemPayload):
+    doc = await db.sizing_systems.find_one({"id": system_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Sizing system not found")
+    name = payload.name.strip()
+    sizes = [s.strip() for s in (payload.sizes or []) if s and s.strip()]
+    if not name or not sizes:
+        raise HTTPException(status_code=400, detail="Name and at least one size required")
+    await db.sizing_systems.update_one(
+        {"id": system_id}, {"$set": {"name": name, "sizes": sizes}}
+    )
+    updated = await db.sizing_systems.find_one({"id": system_id}, {"_id": 0})
+    return updated
+
+
+@api_router.delete("/sizing-systems/{system_id}")
+async def delete_sizing_system(system_id: str):
+    doc = await db.sizing_systems.find_one({"id": system_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Sizing system not found")
+    in_use = await db.costumes.count_documents({"sizing_system": doc["name"]})
+    if in_use > 0:
+        raise HTTPException(status_code=409, detail=f"Sizing system is used by {in_use} costume(s)")
+    await db.sizing_systems.delete_one({"id": system_id})
     return {"ok": True}
 
 
@@ -525,7 +667,18 @@ async def startup():
             await db.categories.insert_one({
                 "id": str(uuid.uuid4()),
                 "name": name,
+                "subcategories": [],
                 "created_at": _now_iso()
+            })
+    # Seed default sizing systems
+    sys_count = await db.sizing_systems.count_documents({})
+    if sys_count == 0:
+        for sys in DEFAULT_SIZING_SYSTEMS:
+            await db.sizing_systems.insert_one({
+                "id": str(uuid.uuid4()),
+                "name": sys["name"],
+                "sizes": sys["sizes"],
+                "created_at": _now_iso(),
             })
 
 

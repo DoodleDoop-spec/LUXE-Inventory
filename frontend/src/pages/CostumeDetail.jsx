@@ -1,12 +1,10 @@
 import { useEffect, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
-import { ArrowLeft, MapPin, Pencil, Trash2, Flag, StickyNote } from "lucide-react";
+import { ArrowLeft, MapPin, Pencil, Trash2, Flag, StickyNote, Calendar, Tag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import CostumeFormDialog from "@/components/CostumeFormDialog";
 import { toast } from "sonner";
-
-const SIZES = ["XS", "S", "M", "L", "XL", "XXL", "XXXL"];
 
 export default function CostumeDetail() {
   const { id } = useParams();
@@ -14,18 +12,21 @@ export default function CostumeDetail() {
   const [costume, setCostume] = useState(null);
   const [categories, setCategories] = useState([]);
   const [locations, setLocations] = useState([]);
+  const [sizingSystems, setSizingSystems] = useState([]);
   const [editOpen, setEditOpen] = useState(false);
 
   const fetchAll = async () => {
     try {
-      const [c, cats, locs] = await Promise.all([
+      const [c, cats, locs, systems] = await Promise.all([
         api.get(`/costumes/${id}`),
         api.get("/categories"),
         api.get("/locations"),
+        api.get("/sizing-systems"),
       ]);
       setCostume(c.data);
       setCategories(cats.data);
       setLocations(locs.data);
+      setSizingSystems(systems.data);
     } catch (e) {
       toast.error("Could not load costume");
       navigate("/inventory");
@@ -52,6 +53,9 @@ export default function CostumeDetail() {
   };
 
   if (!costume) return <div className="py-20 eyebrow">LOADING…</div>;
+
+  const sys = sizingSystems.find((s) => s.name === (costume.sizing_system || "Letter"));
+  const sizeKeys = sys?.sizes || Object.keys(costume.sizes || {});
 
   return (
     <div className="space-y-10" data-testid="costume-detail-page">
@@ -97,29 +101,53 @@ export default function CostumeDetail() {
         </div>
         <div className="md:col-span-7 space-y-8">
           <div>
-            <div className="eyebrow">{costume.category}</div>
+            <div className="eyebrow">
+              {costume.category}
+              {costume.subcategory ? <span className="text-[#09090B] normal-case tracking-normal"> · {costume.subcategory}</span> : null}
+            </div>
             <h1 className="font-display text-4xl sm:text-5xl tracking-tight font-bold text-[#09090B] mt-2" data-testid="detail-name">
               {costume.name}
             </h1>
-            <div className="flex items-center gap-2 mt-3 text-[#52525B]">
-              <MapPin className="h-4 w-4" />
-              <span data-testid="detail-location">
-                {costume.location}
-                {costume.sub_location ? <span className="text-[#71717A]"> · {costume.sub_location}</span> : null}
-              </span>
+            <div className="flex items-center flex-wrap gap-4 mt-3 text-[#52525B]">
+              <div className="flex items-center gap-2" data-testid="detail-location">
+                <MapPin className="h-4 w-4" />
+                <span>
+                  {costume.location}
+                  {costume.sub_location ? <span className="text-[#71717A]"> · {costume.sub_location}</span> : null}
+                </span>
+              </div>
+              {costume.last_year_used && (
+                <div className="flex items-center gap-2" data-testid="detail-last-year">
+                  <Calendar className="h-4 w-4" />
+                  <span>Last used: <span className="font-medium text-[#09090B]">{costume.last_year_used}</span></span>
+                </div>
+              )}
             </div>
+            {(costume.keywords || []).length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-4" data-testid="detail-keywords">
+                {costume.keywords.map((k) => (
+                  <span key={k} className="inline-flex items-center gap-1 text-xs px-2 py-1 bg-[#F4F4F5] text-[#27272A] border border-[#E4E4E7]">
+                    <Tag className="h-3 w-3" />
+                    {k}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="border border-[#E4E4E7] p-6 md:p-8">
-            <div className="flex items-baseline justify-between">
-              <div className="eyebrow">TOTAL QUANTITY</div>
+            <div className="flex items-baseline justify-between gap-4 flex-wrap">
+              <div>
+                <div className="eyebrow">TOTAL QUANTITY</div>
+                <div className="text-xs text-[#71717A] mt-1 font-mono-label">SYSTEM · {costume.sizing_system || "Letter"}</div>
+              </div>
               <div className="font-display text-6xl font-bold tabular-nums text-[#09090B]" data-testid="detail-total">
                 {costume.total_quantity}
               </div>
             </div>
             <div className="divider-thick my-6" />
-            <div className="grid grid-cols-4 sm:grid-cols-7 gap-px bg-[#E4E4E7] border border-[#E4E4E7]">
-              {SIZES.map((s) => {
+            <div className={`grid gap-px bg-[#E4E4E7] border border-[#E4E4E7] ${sizeKeys.length > 7 ? "grid-cols-4 sm:grid-cols-6 md:grid-cols-8" : "grid-cols-4 sm:grid-cols-7"}`}>
+              {sizeKeys.map((s) => {
                 const qty = costume.sizes?.[s] || 0;
                 const note = costume.size_notes?.[s] || "";
                 return (
@@ -135,11 +163,10 @@ export default function CostumeDetail() {
                 );
               })}
             </div>
-            {/* Expanded size notes list */}
-            {SIZES.some((s) => (costume.size_notes?.[s] || "").trim()) && (
+            {sizeKeys.some((s) => (costume.size_notes?.[s] || "").trim()) && (
               <div className="mt-6 space-y-2" data-testid="detail-size-notes-list">
                 <div className="eyebrow">SIZE-SPECIFIC NOTES</div>
-                {SIZES.filter((s) => (costume.size_notes?.[s] || "").trim()).map((s) => (
+                {sizeKeys.filter((s) => (costume.size_notes?.[s] || "").trim()).map((s) => (
                   <div key={s} className="flex gap-3 border border-[#E4E4E7] px-3 py-2 bg-[#FAFAFA]">
                     <div className="font-mono-label text-xs w-10 shrink-0 text-[#09090B] pt-0.5">{s}</div>
                     <p className="text-sm text-[#27272A] whitespace-pre-wrap">{costume.size_notes[s]}</p>
@@ -178,6 +205,7 @@ export default function CostumeDetail() {
         editing={costume}
         categories={categories}
         locations={locations}
+        sizingSystems={sizingSystems}
         onSaved={() => { setEditOpen(false); fetchAll(); }}
       />
     </div>
