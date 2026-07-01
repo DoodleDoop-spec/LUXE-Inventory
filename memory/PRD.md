@@ -44,9 +44,17 @@ without the need for coding experience.
   - Locations page: expandable rows showing costumes in each location + orphan (custom) locations section. New `GET /api/locations/costume-counts`.
   - Settings tab (`/settings`) with org name, default view (grid/list), show flag banner toggle, category CRUD. `GET/PUT /api/settings`. `DELETE /api/categories/{id}` (409 if in use).
 
+- **Iteration 3**:
+  - `last_year_used` (integer) on costume + new sort options (`last_used_asc/desc/name_asc/total_desc/system_size`).
+  - Dynamic **sizing systems** — 4 seeded (Letter, Number (Even), Tall, Petite); costume chooses one. `GET/POST/PUT/DELETE /api/sizing-systems`. Sizing system CRUD in Settings; can't delete if in use.
+  - **Keywords** array on costumes with chip UI; search `q` matches keywords in addition to name/category/location/notes.
+  - **Global search bar** in the header (leftmost); submitting jumps to `/inventory?q=`.
+  - **Subcategories per category**: `GET /api/categories` returns `subcategories[]`; `POST/DELETE /api/categories/{id}/subcategories`; Settings has expandable rows to manage.
+  - Inventory: filter by subcategory and sizing system; new sort dropdown.
+
 ## Status
-- Backend: 23/23 pytest cases pass (iteration 2)
-- Frontend: E2E flows verified; size-note reveal button hardened with functional setState.
+- Backend: 31/31 pytest cases pass
+- Frontend: All spec'd flows and testids verified via Playwright
 
 ## Backlog (Next)
 - P1: Bulk import (CSV) / export costumes

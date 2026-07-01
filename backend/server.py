@@ -489,8 +489,10 @@ async def add_subcategory(category_id: str, payload: SubcategoryPayload):
     name = payload.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Subcategory name required")
+    if "/" in name:
+        raise HTTPException(status_code=400, detail="Subcategory name cannot contain '/'")
     subs = doc.get("subcategories") or []
-    if name in subs:
+    if any(s.lower() == name.lower() for s in subs):
         raise HTTPException(status_code=409, detail="Subcategory already exists")
     subs.append(name)
     await db.categories.update_one({"id": category_id}, {"$set": {"subcategories": subs}})
