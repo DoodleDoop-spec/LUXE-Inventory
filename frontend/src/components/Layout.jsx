@@ -1,6 +1,6 @@
 import { Outlet, NavLink, Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect } from "react";
-import { LayoutDashboard, Shirt, MapPin, Sparkles, Settings as SettingsIcon, Search } from "lucide-react";
+import { LayoutDashboard, Shirt, MapPin, Settings as SettingsIcon, Search, X } from "lucide-react";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, testId: "nav-dashboard" },
@@ -14,7 +14,6 @@ export default function Layout() {
   const navigate = useNavigate();
   const [globalQ, setGlobalQ] = useState("");
 
-  // Sync input with ?q= when on inventory
   useEffect(() => {
     if (location.pathname === "/inventory") {
       const sp = new URLSearchParams(location.search);
@@ -28,22 +27,29 @@ export default function Layout() {
     navigate(q ? `/inventory?q=${encodeURIComponent(q)}` : "/inventory");
   };
 
+  const clearSearch = () => {
+    setGlobalQ("");
+    if (location.pathname === "/inventory") navigate("/inventory");
+  };
+
   return (
     <div className="min-h-screen bg-white">
       <header className="sticky-header">
         <div className="max-w-[1400px] mx-auto px-6 md:px-10">
           <div className="flex items-center justify-between h-16 gap-4">
             <Link to="/" data-testid="brand-link" className="flex items-center gap-3 group shrink-0">
-              <div className="h-8 w-8 bg-[#09090B] flex items-center justify-center">
-                <Sparkles className="h-4 w-4 text-white" strokeWidth={2.5} />
-              </div>
+              <img
+                src="/assets/logo.webp"
+                alt="LUXE"
+                className="h-11 w-11 object-cover rounded-full ring-1 ring-[#E4E4E7]"
+                data-testid="brand-logo"
+              />
               <div className="hidden sm:flex flex-col leading-none">
-                <span className="font-display font-bold text-[15px] text-[#09090B]">WARDROBE/OS</span>
-                <span className="eyebrow text-[10px] mt-0.5">Costume Inventory</span>
+                <span className="font-display font-bold text-[15px] text-[#09090B]">LUXE</span>
+                <span className="eyebrow text-[10px] mt-0.5">Inventory Management</span>
               </div>
             </Link>
 
-            {/* Global search — leftmost tab */}
             <form onSubmit={submitSearch} className="flex-1 max-w-md" data-testid="global-search-form">
               <div className="relative">
                 <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#71717A]" />
@@ -53,8 +59,19 @@ export default function Layout() {
                   value={globalQ}
                   onChange={(e) => setGlobalQ(e.target.value)}
                   placeholder="Search costumes, keywords…"
-                  className="w-full pl-10 pr-3 h-10 border border-[#E4E4E7] bg-white text-sm focus:outline-none focus:border-[#09090B]"
+                  className="w-full pl-10 pr-9 h-10 border border-[#E4E4E7] bg-white text-sm focus:outline-none focus:border-[#09090B]"
                 />
+                {globalQ && (
+                  <button
+                    type="button"
+                    onClick={clearSearch}
+                    data-testid="global-search-clear"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[#71717A] hover:text-[#09090B]"
+                    aria-label="Clear search"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
               </div>
             </form>
 
@@ -86,8 +103,8 @@ export default function Layout() {
       </main>
       <footer className="border-t border-[#E4E4E7] mt-16">
         <div className="max-w-[1400px] mx-auto px-6 md:px-10 py-6 flex items-center justify-between">
-          <span className="eyebrow">WARDROBE/OS — INTERNAL TOOL</span>
-          <span className="eyebrow">v 1.2</span>
+          <span className="eyebrow">LUXE — INVENTORY MANAGEMENT</span>
+          <span className="eyebrow">v 1.3</span>
         </div>
       </footer>
     </div>

@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
-import { ArrowLeft, MapPin, Pencil, Trash2, Flag, StickyNote, Calendar, Tag } from "lucide-react";
+import { ArrowLeft, MapPin, Pencil, Trash2, Flag, StickyNote, Calendar, Tag, Sparkles, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import CostumeFormDialog from "@/components/CostumeFormDialog";
 import { toast } from "sonner";
@@ -13,20 +13,23 @@ export default function CostumeDetail() {
   const [categories, setCategories] = useState([]);
   const [locations, setLocations] = useState([]);
   const [sizingSystems, setSizingSystems] = useState([]);
+  const [shows, setShows] = useState([]);
   const [editOpen, setEditOpen] = useState(false);
 
   const fetchAll = async () => {
     try {
-      const [c, cats, locs, systems] = await Promise.all([
+      const [c, cats, locs, systems, sh] = await Promise.all([
         api.get(`/costumes/${id}`),
         api.get("/categories"),
         api.get("/locations"),
         api.get("/sizing-systems"),
+        api.get("/shows"),
       ]);
       setCostume(c.data);
       setCategories(cats.data);
       setLocations(locs.data);
       setSizingSystems(systems.data);
+      setShows(sh.data);
     } catch (e) {
       toast.error("Could not load costume");
       navigate("/inventory");
@@ -34,6 +37,12 @@ export default function CostumeDetail() {
   };
 
   useEffect(() => { fetchAll(); /* eslint-disable-next-line */ }, [id]);
+
+  const showsById = useMemo(() => {
+    const m = {};
+    for (const s of shows) m[s.id] = s;
+    return m;
+  }, [shows]);
 
   const handleDelete = async () => {
     if (!window.confirm("Delete this costume?")) return;
@@ -47,15 +56,15 @@ export default function CostumeDetail() {
       await api.post(`/costumes/${id}/unflag`);
       toast.success("Flag removed");
       fetchAll();
-    } catch {
-      toast.error("Failed to unflag");
-    }
+    } catch { toast.error("Failed to unflag"); }
   };
 
   if (!costume) return <div className="py-20 eyebrow">LOADING…</div>;
 
   const sys = sizingSystems.find((s) => s.name === (costume.sizing_system || "Letter"));
   const sizeKeys = sys?.sizes || Object.keys(costume.sizes || {});
+  const originShow = costume.original_show_id ? showsById[costume.original_show_id] : null;
+  const additionalShows = (costume.additional_show_ids || []).map((sid) => showsById[sid]).filter(Boolean);
 
   return (
     <div className="space-y-10" data-testid="costume-detail-page">
@@ -74,12 +83,7 @@ export default function CostumeDetail() {
                 <p className="text-xs text-[#B91C1C] mt-1">Flagged on {new Date(costume.flagged_at).toLocaleString()}</p>
               )}
             </div>
-            <Button
-              data-testid="detail-unflag-btn"
-              variant="outline"
-              onClick={handleUnflag}
-              className="rounded-none border-[#EF4444] text-[#B91C1C] hover:bg-[#FEE2E2] h-9"
-            >
+            <Button data-testid="detail-unflag-btn" variant="outline" onClick={handleUnflag} className="rounded-none border-[#EF4444] text-[#B91C1C] hover:bg-[#FEE2E2] h-9">
               Remove flag
             </Button>
           </div>
@@ -116,13 +120,43 @@ export default function CostumeDetail() {
                   {costume.sub_location ? <span className="text-[#71717A]"> · {costume.sub_location}</span> : null}
                 </span>
               </div>
-              {costume.last_year_used && (
-                <div className="flex items-center gap-2" data-testid="detail-last-year">
+              {costume.creator && (
+                <div className="flex items-center gap-2" data-testid="detail-creator">
+                  <Sparkles className="h-4 w-4" />
+                  <span>Creator: <span className="font-medium text-[#09090B]">{costume.creator}</span></span>
+                </div>
+              )}
+              {costume.origin_year && (
+                <div className="flex items-center gap-2" data-testid="detail-origin-year">
                   <Calendar className="h-4 w-4" />
-                  <span>Last used: <span className="font-medium text-[#09090B]">{costume.last_year_used}</span></span>
+                  <span>Origin: <span className="font-medium text-[#09090B]">{costume.origin_year}</span></span>
                 </div>
               )}
             </div>
+
+            {(originShow || additionalShows.length > 0) && (
+              <div className="border-l-2 border-[#09090B] pl-4 mt-5 space-y-2" data-testid="detail-shows">
+                {originShow && (
+                  <div>
+                    <div className="eyebrow">ORIGINAL SHOW</div>
+                    <div className="font-medium text-[#09090B]">{originShow.name}{originShow.year ? ` · ${originShow.year}` : ""}</div>
+                  </div>
+                )}
+                {additionalShows.length > 0 && (
+                  <div>
+                    <div className="eyebrow flex items-center gap-1">
+                      <Users className="h-3 w-3" /> ADDITIONAL SHOWS
+                    </div>
+                    <ul className="mt-1 space-y-0.5 text-sm text-[#27272A]">
+                      {additionalShows.map((s) => (
+                        <li key={s.id}>{s.name}{s.year ? ` · ${s.year}` : ""}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+
             {(costume.keywords || []).length > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-4" data-testid="detail-keywords">
                 {costume.keywords.map((k) => (
@@ -206,6 +240,7 @@ export default function CostumeDetail() {
         categories={categories}
         locations={locations}
         sizingSystems={sizingSystems}
+        shows={shows}
         onSaved={() => { setEditOpen(false); fetchAll(); }}
       />
     </div>

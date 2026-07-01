@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { Plus, Trash2, Tag, Save, Ruler, ChevronDown, ChevronRight, X } from "lucide-react";
+import { Plus, Trash2, Tag, Save, Ruler, ChevronDown, ChevronRight, X, Film } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
+import LocationTree from "@/components/LocationTree";
 
 export default function Settings() {
   const [categories, setCategories] = useState([]);
@@ -21,18 +22,30 @@ export default function Settings() {
   const [editingSys, setEditingSys] = useState(null);
   const [editSysName, setEditSysName] = useState("");
   const [editSysSizes, setEditSysSizes] = useState("");
+  const [shows, setShows] = useState([]);
+  const [newShowName, setNewShowName] = useState("");
+  const [newShowYear, setNewShowYear] = useState("");
+  const [editingShow, setEditingShow] = useState(null);
+  const [editShowName, setEditShowName] = useState("");
+  const [editShowYear, setEditShowYear] = useState("");
+  const [locations, setLocations] = useState([]);
+  const [newLocRoot, setNewLocRoot] = useState("");
   const [settings, setSettings] = useState({ org_name: "", default_view: "grid", show_flag_banner: true });
   const [savingSettings, setSavingSettings] = useState(false);
 
   const fetchAll = async () => {
-    const [c, s, sys] = await Promise.all([
+    const [c, s, sys, sh, locs] = await Promise.all([
       api.get("/categories"),
       api.get("/settings"),
       api.get("/sizing-systems"),
+      api.get("/shows"),
+      api.get("/locations"),
     ]);
     setCategories(c.data);
     setSettings(s.data);
     setSizingSystems(sys.data);
+    setShows(sh.data);
+    setLocations(locs.data);
   };
 
   useEffect(() => { fetchAll(); }, []);
@@ -50,18 +63,14 @@ export default function Settings() {
       toast.error(err.response?.data?.detail || "Failed to add");
     }
   };
-
   const removeCategory = async (id, name) => {
     if (!window.confirm(`Delete category "${name}"?`)) return;
     try {
       await api.delete(`/categories/${id}`);
       toast.success("Category removed");
       fetchAll();
-    } catch (err) {
-      toast.error(err.response?.data?.detail || "Cannot delete");
-    }
+    } catch (err) { toast.error(err.response?.data?.detail || "Cannot delete"); }
   };
-
   const addSubcategory = async (catId) => {
     const name = (newSubcat[catId] || "").trim();
     if (!name) return;
@@ -70,72 +79,122 @@ export default function Settings() {
       setNewSubcat({ ...newSubcat, [catId]: "" });
       toast.success("Subcategory added");
       fetchAll();
-    } catch (err) {
-      toast.error(err.response?.data?.detail || "Failed to add");
-    }
+    } catch (err) { toast.error(err.response?.data?.detail || "Failed to add"); }
   };
-
   const removeSubcategory = async (catId, name) => {
     if (!window.confirm(`Remove subcategory "${name}"?`)) return;
     try {
       await api.delete(`/categories/${catId}/subcategories/${encodeURIComponent(name)}`);
       toast.success("Subcategory removed");
       fetchAll();
-    } catch (err) {
-      toast.error(err.response?.data?.detail || "Failed");
-    }
+    } catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
   };
 
   const addSizingSystem = async (e) => {
     e?.preventDefault?.();
     const name = newSysName.trim();
     const sizes = newSysSizes.split(",").map((s) => s.trim()).filter(Boolean);
-    if (!name || !sizes.length) {
-      toast.error("Name and at least one size required");
-      return;
-    }
+    if (!name || !sizes.length) { toast.error("Name and at least one size required"); return; }
     try {
       await api.post("/sizing-systems", { name, sizes });
       setNewSysName(""); setNewSysSizes("");
       toast.success("Sizing system added");
       fetchAll();
-    } catch (err) {
-      toast.error(err.response?.data?.detail || "Failed");
-    }
+    } catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
   };
-
-  const startEditSys = (s) => {
-    setEditingSys(s.id);
-    setEditSysName(s.name);
-    setEditSysSizes(s.sizes.join(", "));
-  };
-
+  const startEditSys = (s) => { setEditingSys(s.id); setEditSysName(s.name); setEditSysSizes(s.sizes.join(", ")); };
   const saveEditSys = async () => {
     const name = editSysName.trim();
     const sizes = editSysSizes.split(",").map((s) => s.trim()).filter(Boolean);
-    if (!name || !sizes.length) {
-      toast.error("Name and at least one size required");
-      return;
-    }
+    if (!name || !sizes.length) { toast.error("Name and sizes required"); return; }
     try {
       await api.put(`/sizing-systems/${editingSys}`, { name, sizes });
       setEditingSys(null);
       toast.success("Sizing system updated");
       fetchAll();
-    } catch (err) {
-      toast.error(err.response?.data?.detail || "Failed");
-    }
+    } catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
   };
-
   const removeSizingSystem = async (id, name) => {
     if (!window.confirm(`Delete sizing system "${name}"?`)) return;
     try {
       await api.delete(`/sizing-systems/${id}`);
       toast.success("Removed");
       fetchAll();
-    } catch (err) {
-      toast.error(err.response?.data?.detail || "Cannot delete");
+    } catch (err) { toast.error(err.response?.data?.detail || "Cannot delete"); }
+  };
+
+  const addShow = async (e) => {
+    e?.preventDefault?.();
+    const name = newShowName.trim();
+    if (!name) return;
+    const year = newShowYear.trim() ? parseInt(newShowYear, 10) : null;
+    if (newShowYear.trim() && (isNaN(year) || year < 1800 || year > 2200)) {
+      toast.error("Year must be a valid year between 1800 and 2200"); return;
     }
+    try {
+      await api.post("/shows", { name, year });
+      setNewShowName(""); setNewShowYear("");
+      toast.success("Show added");
+      fetchAll();
+    } catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
+  };
+  const startEditShow = (s) => { setEditingShow(s.id); setEditShowName(s.name); setEditShowYear(s.year != null ? String(s.year) : ""); };
+  const saveEditShow = async () => {
+    const name = editShowName.trim();
+    const year = editShowYear.trim() ? parseInt(editShowYear, 10) : null;
+    if (!name) { toast.error("Name required"); return; }
+    if (editShowYear.trim() && (isNaN(year) || year < 1800 || year > 2200)) {
+      toast.error("Year invalid"); return;
+    }
+    try {
+      await api.put(`/shows/${editingShow}`, { name, year });
+      setEditingShow(null);
+      toast.success("Show updated");
+      fetchAll();
+    } catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
+  };
+  const removeShow = async (id, name) => {
+    if (!window.confirm(`Delete show "${name}"?`)) return;
+    try {
+      await api.delete(`/shows/${id}`);
+      toast.success("Removed");
+      fetchAll();
+    } catch (err) { toast.error(err.response?.data?.detail || "Cannot delete"); }
+  };
+
+  const addRootLocation = async (e) => {
+    e?.preventDefault?.();
+    const name = newLocRoot.trim();
+    if (!name) return;
+    try {
+      await api.post("/locations", { name });
+      setNewLocRoot("");
+      toast.success("Location added");
+      fetchAll();
+    } catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
+  };
+  const addChildLocation = async (parentId, name) => {
+    try {
+      await api.post("/locations", { name, parent_id: parentId });
+      toast.success("Nested location added");
+      fetchAll();
+    } catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
+  };
+  const renameLocation = async (id, name) => {
+    try {
+      await api.put(`/locations/${id}`, { name });
+      toast.success("Renamed");
+      fetchAll();
+    } catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
+  };
+  const removeLocation = async (id, name, kidCount) => {
+    if (kidCount > 0) { toast.error("Delete nested locations first"); return; }
+    if (!window.confirm(`Delete "${name}"?`)) return;
+    try {
+      await api.delete(`/locations/${id}`);
+      toast.success("Removed");
+      fetchAll();
+    } catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
   };
 
   const saveSettings = async () => {
@@ -143,9 +202,7 @@ export default function Settings() {
     try {
       await api.put("/settings", settings);
       toast.success("Settings saved");
-    } catch (err) {
-      toast.error(err.response?.data?.detail || "Failed to save");
-    }
+    } catch (err) { toast.error(err.response?.data?.detail || "Failed to save"); }
     setSavingSettings(false);
   };
 
@@ -153,12 +210,9 @@ export default function Settings() {
     <div className="space-y-12" data-testid="settings-page">
       <div className="space-y-2">
         <div className="eyebrow">INDEX 04 / SETTINGS</div>
-        <h1 className="font-display text-4xl sm:text-5xl tracking-tight font-bold text-[#09090B]">
-          Settings
-        </h1>
+        <h1 className="font-display text-4xl sm:text-5xl tracking-tight font-bold text-[#09090B]">Settings</h1>
         <p className="text-sm text-[#71717A] max-w-2xl">
-          Manage categories, subcategories, sizing systems, and preferences.
-          Locations are managed on the dedicated Locations page.
+          Manage categories, subcategories, locations (nested), sizing systems, shows, and preferences.
         </p>
       </div>
 
@@ -176,7 +230,7 @@ export default function Settings() {
               data-testid="settings-org-name"
               value={settings.org_name || ""}
               onChange={(e) => setSettings({ ...settings, org_name: e.target.value })}
-              placeholder="e.g. Broadway Costume Dept."
+              placeholder="e.g. LUXE Show Choir"
               className="rounded-none border-[#E4E4E7] h-11 mt-2"
             />
           </div>
@@ -199,23 +253,45 @@ export default function Settings() {
               <Label className="eyebrow">SHOW FLAG BANNER ON DASHBOARD</Label>
               <p className="text-xs text-[#71717A] mt-1">Show a prominent list of flagged costumes on the home page.</p>
             </div>
-            <Switch
-              data-testid="settings-flag-banner"
-              checked={!!settings.show_flag_banner}
-              onCheckedChange={(v) => setSettings({ ...settings, show_flag_banner: v })}
-            />
+            <Switch data-testid="settings-flag-banner" checked={!!settings.show_flag_banner} onCheckedChange={(v) => setSettings({ ...settings, show_flag_banner: v })} />
           </div>
           <div className="p-5 flex justify-end">
-            <Button
-              data-testid="settings-save-btn"
-              onClick={saveSettings}
-              disabled={savingSettings}
-              className="bg-[#09090B] hover:bg-[#27272A] text-white rounded-none h-10"
-            >
-              <Save className="h-4 w-4 mr-1" />
-              {savingSettings ? "Saving…" : "Save changes"}
+            <Button data-testid="settings-save-btn" onClick={saveSettings} disabled={savingSettings} className="bg-[#09090B] hover:bg-[#27272A] text-white rounded-none h-10">
+              <Save className="h-4 w-4 mr-1" />{savingSettings ? "Saving…" : "Save changes"}
             </Button>
           </div>
+        </div>
+      </section>
+
+      {/* Locations (hierarchical) */}
+      <section className="grid md:grid-cols-12 gap-8">
+        <div className="md:col-span-4">
+          <div className="eyebrow">STORAGE</div>
+          <h2 className="font-display text-xl font-semibold text-[#09090B] mt-2">Locations (nested)</h2>
+          <p className="text-sm text-[#71717A] mt-2">
+            Locations can be nested indefinitely. Add a root, then use the + button to add
+            locations inside any parent (e.g. Costume Closet A → A → 1).
+          </p>
+        </div>
+        <div className="md:col-span-8 space-y-4">
+          <form onSubmit={addRootLocation} className="flex gap-3">
+            <Input
+              data-testid="settings-new-root-loc"
+              placeholder="Root location (e.g. Costume Closet A)"
+              value={newLocRoot}
+              onChange={(e) => setNewLocRoot(e.target.value)}
+              className="h-11 rounded-none border-[#E4E4E7]"
+            />
+            <Button data-testid="settings-add-root-loc-btn" type="submit" className="bg-[#09090B] text-white hover:bg-[#27272A] rounded-none h-11 px-5">
+              <Plus className="h-4 w-4 mr-1" /> Add root
+            </Button>
+          </form>
+          <LocationTree
+            locations={locations}
+            onAdd={addChildLocation}
+            onRename={renameLocation}
+            onDelete={removeLocation}
+          />
         </div>
       </section>
 
@@ -225,18 +301,12 @@ export default function Settings() {
           <div className="eyebrow">TAXONOMY</div>
           <h2 className="font-display text-xl font-semibold text-[#09090B] mt-2">Categories &amp; subcategories</h2>
           <p className="text-sm text-[#71717A] mt-2">
-            Expand a category to manage its subcategories. Categories in use cannot be deleted.
+            Expand a category to manage its subcategories.
           </p>
         </div>
         <div className="md:col-span-8 space-y-4">
           <form onSubmit={addCategory} className="flex gap-3">
-            <Input
-              data-testid="settings-new-cat-input"
-              placeholder="e.g. Sci-Fi"
-              value={newCat}
-              onChange={(e) => setNewCat(e.target.value)}
-              className="h-11 rounded-none border-[#E4E4E7]"
-            />
+            <Input data-testid="settings-new-cat-input" placeholder="e.g. Sci-Fi" value={newCat} onChange={(e) => setNewCat(e.target.value)} className="h-11 rounded-none border-[#E4E4E7]" />
             <Button data-testid="settings-add-cat-btn" type="submit" className="bg-[#09090B] text-white hover:bg-[#27272A] rounded-none h-11 px-5">
               <Plus className="h-4 w-4 mr-1" /> Add
             </Button>
@@ -244,78 +314,107 @@ export default function Settings() {
           <div className="border border-[#E4E4E7]">
             {categories.length === 0 ? (
               <div className="p-8 text-center text-[#71717A]">No categories yet.</div>
-            ) : (
-              categories.map((c, idx) => {
-                const isOpen = !!expandedCat[c.id];
-                const subs = c.subcategories || [];
-                return (
-                  <div key={c.id} data-testid={`cat-row-${c.id}`} className={`${idx !== categories.length - 1 ? "border-b border-[#E4E4E7]" : ""}`}>
-                    <div className="flex items-center justify-between px-5 py-3 hover:bg-[#FAFAFA]">
-                      <button
-                        type="button"
-                        data-testid={`toggle-cat-${c.id}`}
-                        onClick={() => setExpandedCat({ ...expandedCat, [c.id]: !isOpen })}
-                        className="flex items-center gap-3 flex-1 text-left"
-                      >
-                        {isOpen ? <ChevronDown className="h-4 w-4 text-[#71717A]" /> : <ChevronRight className="h-4 w-4 text-[#71717A]" />}
-                        <Tag className="h-4 w-4 text-[#71717A]" />
-                        <span className="font-medium text-[#09090B]">{c.name}</span>
-                        <span className="text-xs text-[#71717A] ml-2">{subs.length} subcategor{subs.length === 1 ? "y" : "ies"}</span>
-                      </button>
-                      <button
-                        data-testid={`delete-cat-${c.id}`}
-                        onClick={() => removeCategory(c.id, c.name)}
-                        className="text-[#EF4444] hover:bg-[#FEF2F2] p-2"
-                        aria-label="Delete category"
-                      >
+            ) : categories.map((c, idx) => {
+              const isOpen = !!expandedCat[c.id];
+              const subs = c.subcategories || [];
+              return (
+                <div key={c.id} data-testid={`cat-row-${c.id}`} className={`${idx !== categories.length - 1 ? "border-b border-[#E4E4E7]" : ""}`}>
+                  <div className="flex items-center justify-between px-5 py-3 hover:bg-[#FAFAFA]">
+                    <button type="button" data-testid={`toggle-cat-${c.id}`} onClick={() => setExpandedCat({ ...expandedCat, [c.id]: !isOpen })} className="flex items-center gap-3 flex-1 text-left">
+                      {isOpen ? <ChevronDown className="h-4 w-4 text-[#71717A]" /> : <ChevronRight className="h-4 w-4 text-[#71717A]" />}
+                      <Tag className="h-4 w-4 text-[#71717A]" />
+                      <span className="font-medium text-[#09090B]">{c.name}</span>
+                      <span className="text-xs text-[#71717A] ml-2">{subs.length} subcategor{subs.length === 1 ? "y" : "ies"}</span>
+                    </button>
+                    <button data-testid={`delete-cat-${c.id}`} onClick={() => removeCategory(c.id, c.name)} className="text-[#EF4444] hover:bg-[#FEF2F2] p-2" aria-label="Delete category">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                  {isOpen && (
+                    <div className="bg-[#FAFAFA] border-t border-[#E4E4E7] p-4 space-y-3">
+                      <div className="flex gap-2 flex-wrap">
+                        {subs.length === 0 ? (
+                          <span className="text-xs text-[#71717A]">No subcategories yet.</span>
+                        ) : subs.map((s) => (
+                          <span key={s} data-testid={`subcat-chip-${c.id}-${s}`} className="inline-flex items-center gap-1 bg-white border border-[#E4E4E7] px-2 py-1 text-xs">
+                            {s}
+                            <button type="button" data-testid={`delete-subcat-${c.id}-${s}`} onClick={() => removeSubcategory(c.id, s)} className="text-[#71717A] hover:text-[#EF4444]" aria-label={`Remove ${s}`}>
+                              <X className="h-3 w-3" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                      <form onSubmit={(e) => { e.preventDefault(); addSubcategory(c.id); }} className="flex gap-2">
+                        <Input data-testid={`new-subcat-input-${c.id}`} value={newSubcat[c.id] || ""} onChange={(e) => setNewSubcat({ ...newSubcat, [c.id]: e.target.value })} placeholder="Add subcategory (e.g. Dresses)" className="h-9 rounded-none border-[#E4E4E7]" />
+                        <Button data-testid={`add-subcat-btn-${c.id}`} type="submit" className="bg-[#09090B] text-white rounded-none h-9 px-3">
+                          <Plus className="h-4 w-4" />
+                        </Button>
+                      </form>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* Shows */}
+      <section className="grid md:grid-cols-12 gap-8">
+        <div className="md:col-span-4">
+          <div className="eyebrow">PROGRAMMING</div>
+          <h2 className="font-display text-xl font-semibold text-[#09090B] mt-2">Shows</h2>
+          <p className="text-sm text-[#71717A] mt-2">
+            Add shows with a name and year. A costume references an <em>original show</em> (which sets its origin year) and any number of <em>additional shows</em>.
+          </p>
+        </div>
+        <div className="md:col-span-8 space-y-4">
+          <form onSubmit={addShow} className="border border-[#E4E4E7] p-4 grid md:grid-cols-3 gap-3">
+            <div className="md:col-span-2">
+              <Input data-testid="settings-new-show-name" placeholder="Show name (e.g. Hairspray)" value={newShowName} onChange={(e) => setNewShowName(e.target.value)} className="h-11 rounded-none border-[#E4E4E7]" />
+            </div>
+            <Input data-testid="settings-new-show-year" type="number" min="1800" max="2200" placeholder="Year (e.g. 2023)" value={newShowYear} onChange={(e) => setNewShowYear(e.target.value)} className="h-11 rounded-none border-[#E4E4E7]" />
+            <div className="md:col-span-3 flex justify-end">
+              <Button data-testid="settings-add-show-btn" type="submit" className="bg-[#09090B] text-white hover:bg-[#27272A] rounded-none h-10 px-4">
+                <Plus className="h-4 w-4 mr-1" /> Add show
+              </Button>
+            </div>
+          </form>
+          <div className="border border-[#E4E4E7]">
+            {shows.length === 0 ? (
+              <div className="p-8 text-center text-[#71717A]">No shows yet.</div>
+            ) : shows.map((s, idx) => (
+              <div key={s.id} data-testid={`show-row-${s.id}`} className={`${idx !== shows.length - 1 ? "border-b border-[#E4E4E7]" : ""}`}>
+                {editingShow === s.id ? (
+                  <div className="p-4 bg-[#FAFAFA] grid md:grid-cols-3 gap-2">
+                    <div className="md:col-span-2">
+                      <Input data-testid={`edit-show-name-${s.id}`} value={editShowName} onChange={(e) => setEditShowName(e.target.value)} className="h-10 rounded-none border-[#E4E4E7]" />
+                    </div>
+                    <Input data-testid={`edit-show-year-${s.id}`} type="number" value={editShowYear} onChange={(e) => setEditShowYear(e.target.value)} className="h-10 rounded-none border-[#E4E4E7]" />
+                    <div className="md:col-span-3 flex gap-2 justify-end">
+                      <Button variant="outline" onClick={() => setEditingShow(null)} className="rounded-none h-9" data-testid={`cancel-edit-show-${s.id}`}>Cancel</Button>
+                      <Button onClick={saveEditShow} className="bg-[#09090B] text-white rounded-none h-9" data-testid={`save-edit-show-${s.id}`}>
+                        <Save className="h-4 w-4 mr-1" /> Save
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between px-5 py-3 hover:bg-[#FAFAFA]">
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <Film className="h-4 w-4 text-[#71717A] shrink-0" />
+                      <span className="font-medium text-[#09090B] truncate">{s.name}</span>
+                      {s.year != null && <span className="text-xs text-[#71717A] font-mono-label tabular-nums shrink-0">{s.year}</span>}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button data-testid={`edit-show-${s.id}`} onClick={() => startEditShow(s)} className="text-xs font-medium text-[#09090B] hover:underline px-2 py-1">Edit</button>
+                      <button data-testid={`delete-show-${s.id}`} onClick={() => removeShow(s.id, s.name)} className="text-[#EF4444] hover:bg-[#FEF2F2] p-2" aria-label="Delete show">
                         <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
-                    {isOpen && (
-                      <div className="bg-[#FAFAFA] border-t border-[#E4E4E7] p-4 space-y-3">
-                        <div className="flex gap-2 flex-wrap">
-                          {subs.length === 0 ? (
-                            <span className="text-xs text-[#71717A]">No subcategories yet.</span>
-                          ) : subs.map((s) => (
-                            <span key={s} data-testid={`subcat-chip-${c.id}-${s}`} className="inline-flex items-center gap-1 bg-white border border-[#E4E4E7] px-2 py-1 text-xs">
-                              {s}
-                              <button
-                                type="button"
-                                data-testid={`delete-subcat-${c.id}-${s}`}
-                                onClick={() => removeSubcategory(c.id, s)}
-                                className="text-[#71717A] hover:text-[#EF4444]"
-                                aria-label={`Remove ${s}`}
-                              >
-                                <X className="h-3 w-3" />
-                              </button>
-                            </span>
-                          ))}
-                        </div>
-                        <form
-                          onSubmit={(e) => { e.preventDefault(); addSubcategory(c.id); }}
-                          className="flex gap-2"
-                        >
-                          <Input
-                            data-testid={`new-subcat-input-${c.id}`}
-                            value={newSubcat[c.id] || ""}
-                            onChange={(e) => setNewSubcat({ ...newSubcat, [c.id]: e.target.value })}
-                            placeholder="Add subcategory (e.g. Dresses)"
-                            className="h-9 rounded-none border-[#E4E4E7]"
-                          />
-                          <Button
-                            data-testid={`add-subcat-btn-${c.id}`}
-                            type="submit"
-                            className="bg-[#09090B] text-white rounded-none h-9 px-3"
-                          >
-                            <Plus className="h-4 w-4" />
-                          </Button>
-                        </form>
-                      </div>
-                    )}
                   </div>
-                );
-              })
-            )}
+                )}
+              </div>
+            ))}
           </div>
         </div>
       </section>
@@ -326,25 +425,13 @@ export default function Settings() {
           <div className="eyebrow">SIZING</div>
           <h2 className="font-display text-xl font-semibold text-[#09090B] mt-2">Sizing systems</h2>
           <p className="text-sm text-[#71717A] mt-2">
-            Each costume uses one sizing system. Add or edit systems here. Systems in use cannot be deleted.
+            Each costume uses one sizing system. Add or edit systems here.
           </p>
         </div>
         <div className="md:col-span-8 space-y-4">
           <form onSubmit={addSizingSystem} className="border border-[#E4E4E7] p-4 grid md:grid-cols-2 gap-3">
-            <Input
-              data-testid="settings-new-sys-name"
-              placeholder="System name (e.g. Youth Number)"
-              value={newSysName}
-              onChange={(e) => setNewSysName(e.target.value)}
-              className="h-11 rounded-none border-[#E4E4E7]"
-            />
-            <Input
-              data-testid="settings-new-sys-sizes"
-              placeholder="Sizes, comma-separated (e.g. 6, 8, 10)"
-              value={newSysSizes}
-              onChange={(e) => setNewSysSizes(e.target.value)}
-              className="h-11 rounded-none border-[#E4E4E7]"
-            />
+            <Input data-testid="settings-new-sys-name" placeholder="System name" value={newSysName} onChange={(e) => setNewSysName(e.target.value)} className="h-11 rounded-none border-[#E4E4E7]" />
+            <Input data-testid="settings-new-sys-sizes" placeholder="Sizes, comma-separated" value={newSysSizes} onChange={(e) => setNewSysSizes(e.target.value)} className="h-11 rounded-none border-[#E4E4E7]" />
             <div className="md:col-span-2 flex justify-end">
               <Button data-testid="settings-add-sys-btn" type="submit" className="bg-[#09090B] text-white hover:bg-[#27272A] rounded-none h-10 px-4">
                 <Plus className="h-4 w-4 mr-1" /> Add sizing system
@@ -358,32 +445,11 @@ export default function Settings() {
               <div key={s.id} data-testid={`sys-row-${s.id}`} className={`${idx !== sizingSystems.length - 1 ? "border-b border-[#E4E4E7]" : ""}`}>
                 {editingSys === s.id ? (
                   <div className="p-4 bg-[#FAFAFA] space-y-2">
-                    <Input
-                      data-testid={`edit-sys-name-${s.id}`}
-                      value={editSysName}
-                      onChange={(e) => setEditSysName(e.target.value)}
-                      className="h-10 rounded-none border-[#E4E4E7]"
-                    />
-                    <Input
-                      data-testid={`edit-sys-sizes-${s.id}`}
-                      value={editSysSizes}
-                      onChange={(e) => setEditSysSizes(e.target.value)}
-                      className="h-10 rounded-none border-[#E4E4E7]"
-                    />
+                    <Input data-testid={`edit-sys-name-${s.id}`} value={editSysName} onChange={(e) => setEditSysName(e.target.value)} className="h-10 rounded-none border-[#E4E4E7]" />
+                    <Input data-testid={`edit-sys-sizes-${s.id}`} value={editSysSizes} onChange={(e) => setEditSysSizes(e.target.value)} className="h-10 rounded-none border-[#E4E4E7]" />
                     <div className="flex gap-2 justify-end">
-                      <Button
-                        variant="outline"
-                        onClick={() => setEditingSys(null)}
-                        className="rounded-none h-9"
-                        data-testid={`cancel-edit-sys-${s.id}`}
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        onClick={saveEditSys}
-                        className="bg-[#09090B] text-white rounded-none h-9"
-                        data-testid={`save-edit-sys-${s.id}`}
-                      >
+                      <Button variant="outline" onClick={() => setEditingSys(null)} className="rounded-none h-9" data-testid={`cancel-edit-sys-${s.id}`}>Cancel</Button>
+                      <Button onClick={saveEditSys} className="bg-[#09090B] text-white rounded-none h-9" data-testid={`save-edit-sys-${s.id}`}>
                         <Save className="h-4 w-4 mr-1" /> Save
                       </Button>
                     </div>
@@ -396,19 +462,8 @@ export default function Settings() {
                       <span className="font-mono-label text-xs text-[#71717A] truncate">{s.sizes.join(", ")}</span>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        data-testid={`edit-sys-${s.id}`}
-                        onClick={() => startEditSys(s)}
-                        className="text-xs font-medium text-[#09090B] hover:underline px-2 py-1"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        data-testid={`delete-sys-${s.id}`}
-                        onClick={() => removeSizingSystem(s.id, s.name)}
-                        className="text-[#EF4444] hover:bg-[#FEF2F2] p-2"
-                        aria-label="Delete sizing system"
-                      >
+                      <button data-testid={`edit-sys-${s.id}`} onClick={() => startEditSys(s)} className="text-xs font-medium text-[#09090B] hover:underline px-2 py-1">Edit</button>
+                      <button data-testid={`delete-sys-${s.id}`} onClick={() => removeSizingSystem(s.id, s.name)} className="text-[#EF4444] hover:bg-[#FEF2F2] p-2" aria-label="Delete sizing system">
                         <Trash2 className="h-4 w-4" />
                       </button>
                     </div>

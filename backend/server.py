@@ -125,7 +125,9 @@ class CostumeBase(BaseModel):
     sizes: Dict[str, int] = Field(default_factory=dict)
     size_notes: Dict[str, str] = Field(default_factory=dict)
     keywords: List[str] = Field(default_factory=list)
-    last_year_used: Optional[int] = None
+    creator: Optional[str] = ""
+    original_show_id: Optional[str] = None
+    additional_show_ids: List[str] = Field(default_factory=list)
 
 
 class CostumeCreate(CostumeBase):
@@ -145,7 +147,9 @@ class CostumeUpdate(BaseModel):
     sizes: Optional[Dict[str, int]] = None
     size_notes: Optional[Dict[str, str]] = None
     keywords: Optional[List[str]] = None
-    last_year_used: Optional[int] = None
+    creator: Optional[str] = None
+    original_show_id: Optional[str] = None
+    additional_show_ids: Optional[List[str]] = None
     image_id: Optional[str] = None
     is_flagged: Optional[bool] = None
     flag_reason: Optional[str] = None
@@ -168,7 +172,10 @@ class Costume(BaseModel):
     sizes: Dict[str, int]
     size_notes: Dict[str, str] = Field(default_factory=dict)
     keywords: List[str] = Field(default_factory=list)
-    last_year_used: Optional[int] = None
+    creator: str = ""
+    original_show_id: Optional[str] = None
+    additional_show_ids: List[str] = Field(default_factory=list)
+    origin_year: Optional[int] = None
     total_quantity: int
     image_id: Optional[str] = None
     is_flagged: bool = False
@@ -176,6 +183,19 @@ class Costume(BaseModel):
     flagged_at: Optional[str] = None
     created_at: str
     updated_at: str
+
+
+class Show(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    name: str
+    year: Optional[int] = None
+    created_at: str
+
+
+class ShowPayload(BaseModel):
+    name: str
+    year: Optional[int] = None
 
 
 class SizingSystem(BaseModel):
@@ -199,10 +219,18 @@ class LocationItem(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
     name: str
+    parent_id: Optional[str] = None
+    path: Optional[str] = None
+    depth: Optional[int] = 0
     created_at: str
 
 
 class LocationCreate(BaseModel):
+    name: str
+    parent_id: Optional[str] = None
+
+
+class LocationRename(BaseModel):
     name: str
 
 
@@ -257,6 +285,7 @@ async def list_costumes(
             {"location": {"$regex": q, "$options": "i"}},
             {"sub_location": {"$regex": q, "$options": "i"}},
             {"notes": {"$regex": q, "$options": "i"}},
+            {"creator": {"$regex": q, "$options": "i"}},
             {"keywords": {"$regex": q, "$options": "i"}},
         ]
     if category:
@@ -272,12 +301,13 @@ async def list_costumes(
     if flagged is not None:
         query["is_flagged"] = flagged
     # Sorting
-    sort_spec = [("updated_at", -1)]
-    if sort == "last_used_asc":
-        # low year to high year; costumes without last_year_used sink to end
-        sort_spec = [("last_year_used", 1), ("updated_at", -1)]
-    elif sort == "last_used_desc":
-        sort_spec = [("last_year_used", -1), ("updated_at", -1)]
+    sort_spec = [("origin_year", 1), ("name", 1)]  # default: origin year asc
+    if sort == "updated_desc":
+        sort_spec = [("updated_at", -1)]
+    elif sort == "origin_year_asc":
+        sort_spec = [("origin_year", 1), ("name", 1)]
+    elif sort == "origin_year_desc":
+        sort_spec = [("origin_year", -1), ("name", 1)]
     elif sort == "name_asc":
         sort_spec = [("name", 1)]
     elif sort == "total_desc":
@@ -285,9 +315,9 @@ async def list_costumes(
     elif sort == "system_size":
         sort_spec = [("sizing_system", 1), ("name", 1)]
     docs = await db.costumes.find(query, {"_id": 0}).sort(sort_spec).to_list(2000)
-    # If ascending last_used, push null values to the end
-    if sort == "last_used_asc":
-        docs.sort(key=lambda d: (d.get("last_year_used") is None, d.get("last_year_used") or 0))
+    # Push nulls to the end for ascending year sorts
+    if sort in (None, "origin_year_asc"):
+        docs.sort(key=lambda d: (d.get("origin_year") is None, d.get("origin_year") or 0, d.get("name", "").lower()))
     return docs
 
 
@@ -299,12 +329,23 @@ async def get_costume(costume_id: str):
     return doc
 
 
+async def _resolve_origin_year(original_show_id: Optional[str]) -> Optional[int]:
+    if not original_show_id:
+        return None
+    show = await db.shows.find_one({"id": original_show_id})
+    if not show:
+        return None
+    y = show.get("year")
+    return int(y) if y is not None else None
+
+
 @api_router.post("/costumes", response_model=Costume)
 async def create_costume(payload: CostumeCreate):
     now = _now_iso()
     sizes = {str(k): int(v or 0) for k, v in (payload.sizes or {}).items()}
     size_notes = {str(k): str(v or "") for k, v in (payload.size_notes or {}).items()}
     keywords = [k.strip() for k in (payload.keywords or []) if k and k.strip()]
+    origin_year = await _resolve_origin_year(payload.original_show_id)
     doc = {
         "id": str(uuid.uuid4()),
         "name": payload.name.strip(),
@@ -317,7 +358,10 @@ async def create_costume(payload: CostumeCreate):
         "sizes": sizes,
         "size_notes": size_notes,
         "keywords": keywords,
-        "last_year_used": payload.last_year_used,
+        "creator": (payload.creator or "").strip(),
+        "original_show_id": payload.original_show_id,
+        "additional_show_ids": list(payload.additional_show_ids or []),
+        "origin_year": origin_year,
         "total_quantity": _compute_total(sizes),
         "image_id": payload.image_id,
         "is_flagged": bool(payload.is_flagged),
@@ -345,6 +389,8 @@ async def update_costume(costume_id: str, payload: CostumeUpdate):
         updates["size_notes"] = {str(k): str(v or "") for k, v in (updates["size_notes"] or {}).items()}
     if "keywords" in updates:
         updates["keywords"] = [k.strip() for k in (updates["keywords"] or []) if k and k.strip()]
+    if "original_show_id" in updates:
+        updates["origin_year"] = await _resolve_origin_year(updates["original_show_id"])
     if "is_flagged" in updates:
         if updates["is_flagged"]:
             updates["flagged_at"] = _now_iso()
@@ -397,15 +443,41 @@ async def delete_costume(costume_id: str):
 
 
 # --------- Locations Routes ---------
+def _build_location_path(all_docs: List[dict], doc: dict) -> tuple[str, int]:
+    by_id = {d["id"]: d for d in all_docs}
+    parts = []
+    depth = 0
+    cur = doc
+    seen = set()
+    while cur:
+        if cur["id"] in seen:
+            break
+        seen.add(cur["id"])
+        parts.append(cur.get("name", ""))
+        pid = cur.get("parent_id")
+        if not pid:
+            break
+        depth += 1
+        cur = by_id.get(pid)
+    return " / ".join(reversed(parts)), depth
+
+
 @api_router.get("/locations", response_model=List[LocationItem])
 async def list_locations():
-    docs = await db.locations.find({}, {"_id": 0}).sort("name", 1).to_list(1000)
+    docs = await db.locations.find({}, {"_id": 0}).to_list(2000)
+    # Compute path and depth for each
+    for d in docs:
+        d.setdefault("parent_id", None)
+        path, depth = _build_location_path(docs, d)
+        d["path"] = path
+        d["depth"] = depth
+    docs.sort(key=lambda d: d["path"].lower())
     return docs
 
 
 @api_router.get("/locations/costume-counts")
 async def location_costume_counts():
-    """Return {location_name: count} for each location currently used."""
+    """Return {location_path: {count, items}} aggregated over costume.location strings."""
     pipeline = [
         {"$group": {"_id": "$location", "count": {"$sum": 1}, "items": {"$sum": "$total_quantity"}}},
     ]
@@ -421,20 +493,64 @@ async def create_location(payload: LocationCreate):
     name = payload.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Name required")
-    existing = await db.locations.find_one({"name": name})
-    if existing:
-        raise HTTPException(status_code=409, detail="Location already exists")
-    doc = {"id": str(uuid.uuid4()), "name": name, "created_at": _now_iso()}
+    if "/" in name:
+        raise HTTPException(status_code=400, detail="Name cannot contain '/'")
+    parent_id = payload.parent_id
+    if parent_id:
+        parent = await db.locations.find_one({"id": parent_id})
+        if not parent:
+            raise HTTPException(status_code=404, detail="Parent location not found")
+    # Duplicate check within same parent
+    dupe = await db.locations.find_one({"name": name, "parent_id": parent_id})
+    if dupe:
+        raise HTTPException(status_code=409, detail="Location already exists under this parent")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "parent_id": parent_id,
+        "created_at": _now_iso(),
+    }
     await db.locations.insert_one(doc)
+    all_docs = await db.locations.find({}, {"_id": 0}).to_list(2000)
+    path, depth = _build_location_path(all_docs, doc)
+    doc["path"] = path
+    doc["depth"] = depth
     doc.pop("_id", None)
     return doc
 
 
+@api_router.put("/locations/{location_id}", response_model=LocationItem)
+async def rename_location(location_id: str, payload: LocationRename):
+    doc = await db.locations.find_one({"id": location_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Location not found")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name required")
+    if "/" in name:
+        raise HTTPException(status_code=400, detail="Name cannot contain '/'")
+    dupe = await db.locations.find_one({"name": name, "parent_id": doc.get("parent_id"), "id": {"$ne": location_id}})
+    if dupe:
+        raise HTTPException(status_code=409, detail="Sibling location already has that name")
+    await db.locations.update_one({"id": location_id}, {"$set": {"name": name}})
+    all_docs = await db.locations.find({}, {"_id": 0}).to_list(2000)
+    updated = next((d for d in all_docs if d["id"] == location_id), None)
+    path, depth = _build_location_path(all_docs, updated)
+    updated["path"] = path
+    updated["depth"] = depth
+    updated.pop("_id", None)
+    return updated
+
+
 @api_router.delete("/locations/{location_id}")
 async def delete_location(location_id: str):
-    res = await db.locations.delete_one({"id": location_id})
-    if res.deleted_count == 0:
+    doc = await db.locations.find_one({"id": location_id})
+    if not doc:
         raise HTTPException(status_code=404, detail="Location not found")
+    child = await db.locations.find_one({"parent_id": location_id})
+    if child:
+        raise HTTPException(status_code=409, detail="Location has children; delete them first")
+    await db.locations.delete_one({"id": location_id})
     return {"ok": True}
 
 
@@ -562,6 +678,64 @@ async def delete_sizing_system(system_id: str):
     return {"ok": True}
 
 
+# --------- Shows Routes ---------
+@api_router.get("/shows", response_model=List[Show])
+async def list_shows():
+    docs = await db.shows.find({}, {"_id": 0}).to_list(1000)
+    docs.sort(key=lambda d: (d.get("year") is None, d.get("year") or 0, (d.get("name") or "").lower()))
+    return docs
+
+
+@api_router.post("/shows", response_model=Show)
+async def create_show(payload: ShowPayload):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name required")
+    year = int(payload.year) if payload.year is not None else None
+    dupe = await db.shows.find_one({"name": name, "year": year})
+    if dupe:
+        raise HTTPException(status_code=409, detail="Show already exists")
+    doc = {"id": str(uuid.uuid4()), "name": name, "year": year, "created_at": _now_iso()}
+    await db.shows.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.put("/shows/{show_id}", response_model=Show)
+async def update_show(show_id: str, payload: ShowPayload):
+    doc = await db.shows.find_one({"id": show_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Show not found")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name required")
+    year = int(payload.year) if payload.year is not None else None
+    await db.shows.update_one({"id": show_id}, {"$set": {"name": name, "year": year}})
+    # Re-compute origin_year on costumes using this show
+    await db.costumes.update_many(
+        {"original_show_id": show_id},
+        {"$set": {"origin_year": year, "updated_at": _now_iso()}}
+    )
+    updated = await db.shows.find_one({"id": show_id}, {"_id": 0})
+    return updated
+
+
+@api_router.delete("/shows/{show_id}")
+async def delete_show(show_id: str):
+    doc = await db.shows.find_one({"id": show_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Show not found")
+    used_original = await db.costumes.count_documents({"original_show_id": show_id})
+    used_additional = await db.costumes.count_documents({"additional_show_ids": show_id})
+    if used_original + used_additional > 0:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Show is used by {used_original + used_additional} costume(s)"
+        )
+    await db.shows.delete_one({"id": show_id})
+    return {"ok": True}
+
+
 # --------- Settings Routes ---------
 @api_router.get("/settings")
 async def get_settings():
@@ -682,6 +856,8 @@ async def startup():
                 "sizes": sys["sizes"],
                 "created_at": _now_iso(),
             })
+    # Migration: ensure every location doc has parent_id field
+    await db.locations.update_many({"parent_id": {"$exists": False}}, {"$set": {"parent_id": None}})
 
 
 @app.on_event("shutdown")

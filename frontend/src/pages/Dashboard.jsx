@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
-import { Boxes, Shirt, Tag, MapPin, ArrowUpRight, Plus, Flag } from "lucide-react";
+import { Boxes, Shirt, Tag, ArrowUpRight, Plus, Flag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function Dashboard() {
@@ -14,15 +14,13 @@ export default function Dashboard() {
       try {
         const [s, r, f] = await Promise.all([
           api.get("/stats"),
-          api.get("/costumes"),
+          api.get("/costumes", { params: { sort: "updated_desc" } }),
           api.get("/flagged"),
         ]);
         setStats(s.data);
         setRecent(r.data.slice(0, 8));
         setFlagged(f.data);
-      } catch (e) {
-        console.error(e);
-      }
+      } catch (e) { console.error(e); }
     })();
   }, []);
 
@@ -35,17 +33,12 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-12" data-testid="dashboard-page">
-      {/* Hero */}
       <section className="grid md:grid-cols-12 gap-6 items-end">
         <div className="md:col-span-8 space-y-4">
           <div className="eyebrow">OVERVIEW / INDEX 01</div>
-          <h1 className="font-display text-4xl sm:text-5xl lg:text-6xl tracking-tight font-bold text-[#09090B] leading-[1.05]">
-            The wardrobe,<br />measured precisely.
+          <h1 className="font-display text-4xl sm:text-5xl lg:text-6xl tracking-tight font-bold text-[#09090B] leading-[1.05]" data-testid="dashboard-title">
+            LUXE Inventory Management System
           </h1>
-          <p className="text-base text-[#52525B] max-w-xl leading-relaxed">
-            Track every costume by location, total quantity, and size. Search the entire inventory
-            in seconds — no spreadsheets, no guesswork.
-          </p>
         </div>
         <div className="md:col-span-4 flex md:justify-end gap-3">
           <Link to="/inventory">
@@ -65,7 +58,6 @@ export default function Dashboard() {
 
       <div className="divider-thick" />
 
-      {/* Stat tiles */}
       <section className="grid grid-cols-2 md:grid-cols-4 gap-px bg-[#E4E4E7] border border-[#E4E4E7]">
         {tiles.map(({ label, value, icon: Icon, testId }) => (
           <div key={label} data-testid={testId} className="bg-white p-6 md:p-8 flex flex-col justify-between min-h-[160px]">
@@ -80,7 +72,6 @@ export default function Dashboard() {
         ))}
       </section>
 
-      {/* Flagged costumes banner */}
       {flagged.length > 0 && (
         <section data-testid="flagged-section" className="border border-[#EF4444] bg-[#FEF2F2]">
           <div className="p-5 md:p-6 border-b border-[#FCA5A5] flex items-center justify-between">
@@ -115,7 +106,6 @@ export default function Dashboard() {
         </section>
       )}
 
-      {/* Recent costumes */}
       <section className="space-y-6">
         <div className="flex items-end justify-between">
           <div>

@@ -1,0 +1,43 @@
+{
+  "summary": "Iteration 4 full-stack verification. Backend 16/16 pytest cases PASS. Verified: (a) Hierarchical Locations — GET returns parent_id/path/depth for every row, POST supports parent_id and rejects dup-sibling (409), '/' in name (400); PUT rejects dup-sibling (409); DELETE returns 409 when node has children; migration ensures every doc has parent_id. Depth 3+ verified via API (Test-Root / Test-A / Test-1 / Test-x). (b) Shows CRUD — GET sorted, POST 409 on (name+year) dupe, same name different year OK, PUT edits year, DELETE 409 when used as original OR additional. (c) Costume model — creator/original_show_id/additional_show_ids accepted; origin_year auto-populated from original show; PUT show year propagates origin_year to all costumes using it as original (verified). last_year_used is REMOVED from output model. (d) Sorts — default = origin_year_asc (nulls last), plus origin_year_desc, updated_desc, name_asc, total_desc, system_size; deprecated last_used_asc/last_used_desc do NOT 500 (fall to default). (e) Backwards compat — legacy costume without new fields returns creator=\"\", origin_year=null, additional_show_ids=[]. Frontend E2E verified: brand-logo src=/assets/logo.webp, dashboard-title=\"LUXE Inventory Management System\", global-search-clear appears/disappears on typing/clear, Inventory filters/sort collapsed by default (toggle-filters-btn/toggle-sort-btn open filters-panel/sort-panel with filter-category/subcategory/location/flagged-btn — filter-size and filter-sizing-system correctly ABSENT), default sort chip = 'Origin year ↑ (oldest first)', search-clear works, view-list-btn shows row-thumb-{id} column with real images, Locations page tree UI supports add/rename/delete at 4 depths (root->A->1->x), Settings has settings-new-root-loc/add-root-loc-btn + LocationTree, Shows section with settings-new-show-name/year/add-show-btn plus show-row-{id}/edit-show-{id}/delete-show-{id}. CostumeFormDialog: form-location-level-0, form-creator, form-original-show, form-sub-location present; form-last-year is REMOVED; form-add-show-* toggle buttons render. Costume detail (/costume/:id) renders detail-name/detail-creator/detail-origin-year/detail-shows (original + additional)/detail-keywords for iter-4 costume; legacy costume correctly conditional-renders only detail-name.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard 'Recently updated' grid", "issues": ["Third slot displays an empty light-gray card even when only 2 costumes exist — should either hide the empty tile or render an obvious placeholder/skeleton."]},
+      {"screen": "Inventory list view thumbnail", "issues": ["When a costume has no image_id, row-thumb cell renders as a very thin/empty box on the far left — consider a small placeholder glyph."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "(Optional) Hide/skeleton the empty 3rd tile on Dashboard 'Recently updated' when fewer than 3 costumes.",
+    "(Optional) Add a placeholder icon in list-view row-thumb when a costume has no image."
+  ],
+  "critical_code_review_comments": [
+    "server.py still uses deprecated @app.on_event('startup'/'shutdown') — migrate to FastAPI lifespan.",
+    "server.py uses synchronous `requests` inside async handlers (put_object/get_object) — will block the event loop under load; switch to httpx.AsyncClient or run in a threadpool.",
+    "list_costumes: default and origin_year_asc paths do a Python-side re-sort after Mongo sort to push nulls last — O(n) but acceptable for <2000 docs. For scale, use $sort with a computed field ($ifNull) in aggregation.",
+    "list_categories still synthesizes ghost categories from costume.category values with a fresh uuid on every call — the client will see a new id per request for ad-hoc categories.",
+    "CostumeUpdate uses model_dump(exclude_none=True) — clients cannot explicitly clear original_show_id / creator back to null via PUT (passing null is silently dropped). Consider exclude_unset=True + explicit nullable handling for original_show_id/creator/additional_show_ids.",
+    "Locations delete blocks when a node has children but does not check if any costume.location references its path — deleting a leaf still used by costumes leaves stale `costume.location` strings pointing at nothing. Consider blocking or cascading.",
+    "Show model_dump on PUT overwrites name/year but doesn't touch created_at, and origin_year propagation writes updated_at on all affected costumes — acceptable, but there's no transaction guarantee if the propagation fails partway.",
+    "Frontend route is /costume/:id (singular) while API/collection is /costumes — mild inconsistency, not a bug."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (rewrote as iteration-4 suite: dropped last_year_used tests; added tests for hierarchical locations CRUD/depth-3/409-on-children, shows CRUD + 409-on-in-use + year propagation to origin_year, costume creator/original_show_id/additional_show_ids, new sorts + legacy sort no-500 fallback, backcompat defaults; 16 tests, all pass)"
+  ],
+  "success_rate": {"backend": "100% (16/16)", "frontend": "100% of iteration-4 spec testids"},
+  "test_credentials": "N/A (no auth in this app; /app/memory/test_credentials.md not present)",
+  "seed_data_creation": "pytest creates/cleans TEST_* costumes/locations/shows. Frontend E2E left one 'PW Test Loc *' root location and one 'PW_CAT_*' category behind from prior iterations — harmless and deletable via UI.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "backend_test.py at /app/backend/tests/backend_test.py is the current iteration-4 regression suite (16 tests, parallel-safe via pytest-xdist). Key endpoints: /api/locations (parent_id/path/depth, 409 on dup-sibling, 400 on '/'), /api/shows (409 on name+year dupe, 409 on delete-when-used), /api/costumes (creator/original_show_id/additional_show_ids/origin_year — origin_year is denormalized from show.year and auto-updates on show.year PUT). Default sort=origin_year_asc with null-last. Legacy sorts last_used_* must fall through to default (200, not 500). Frontend routes: /costume/:id (singular). CostumeDetail conditionally omits detail-creator/detail-origin-year/detail-shows/detail-keywords when their underlying data is empty — this is intentional per iter-3 spec and still holds.",
+  "rca of the issue": "N/A — no bugs found in iteration-4 code. The two design_issues (empty 3rd dashboard tile, thin row-thumb when no image) are cosmetic and don't block functionality."
+}
