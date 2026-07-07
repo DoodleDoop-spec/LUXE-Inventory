@@ -9,6 +9,7 @@ import Locations from "@/pages/Locations";
 import Settings from "@/pages/Settings";
 import Shows from "@/pages/Shows";
 import ShowDetail from "@/pages/ShowDetail";
+import GroupDetail from "@/pages/GroupDetail";
 
 function App() {
   return (
@@ -22,6 +23,7 @@ function App() {
             <Route path="/locations" element={<Locations />} />
             <Route path="/shows" element={<Shows />} />
             <Route path="/shows/:id" element={<ShowDetail />} />
+            <Route path="/group/:id" element={<GroupDetail />} />
             <Route path="/settings" element={<Settings />} />
           </Route>
         </Routes>

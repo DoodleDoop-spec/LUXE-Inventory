@@ -128,6 +128,8 @@ class CostumeBase(BaseModel):
     creator: Optional[str] = ""
     original_show_id: Optional[str] = None
     additional_show_ids: List[str] = Field(default_factory=list)
+    group_id: Optional[str] = None
+    variant_label: Optional[str] = ""
 
 
 class CostumeCreate(CostumeBase):
@@ -153,6 +155,8 @@ class CostumeUpdate(BaseModel):
     image_id: Optional[str] = None
     is_flagged: Optional[bool] = None
     flag_reason: Optional[str] = None
+    group_id: Optional[str] = None
+    variant_label: Optional[str] = None
 
 
 class FlagPayload(BaseModel):
@@ -183,6 +187,40 @@ class Costume(BaseModel):
     flagged_at: Optional[str] = None
     created_at: str
     updated_at: str
+    group_id: Optional[str] = None
+    variant_label: str = ""
+
+
+class InventoryGroup(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    name: str
+    category: str = ""
+    subcategory: str = ""
+    location: str = ""
+    sub_location: str = ""
+    notes: str = ""
+    keywords: List[str] = Field(default_factory=list)
+    creator: str = ""
+    original_show_id: Optional[str] = None
+    additional_show_ids: List[str] = Field(default_factory=list)
+    image_id: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+
+class GroupPayload(BaseModel):
+    name: str
+    category: Optional[str] = ""
+    subcategory: Optional[str] = ""
+    location: Optional[str] = ""
+    sub_location: Optional[str] = ""
+    notes: Optional[str] = ""
+    keywords: Optional[List[str]] = None
+    creator: Optional[str] = ""
+    original_show_id: Optional[str] = None
+    additional_show_ids: Optional[List[str]] = None
+    image_id: Optional[str] = None
 
 
 class Show(BaseModel):
@@ -416,6 +454,8 @@ async def create_costume(payload: CostumeCreate):
         "is_flagged": bool(payload.is_flagged),
         "flag_reason": (payload.flag_reason or "").strip() if payload.is_flagged else "",
         "flagged_at": now if payload.is_flagged else None,
+        "group_id": payload.group_id,
+        "variant_label": (payload.variant_label or "").strip(),
         "created_at": now,
         "updated_at": now,
     }
@@ -762,6 +802,121 @@ async def delete_sizing_system(system_id: str):
         raise HTTPException(status_code=409, detail=f"Sizing system is used by {in_use} costume(s)")
     await db.sizing_systems.delete_one({"id": system_id})
     return {"ok": True}
+
+
+# --------- Inventory Groups Routes ---------
+@api_router.get("/groups")
+async def list_groups():
+    docs = await db.groups.find({}, {"_id": 0}).sort("updated_at", -1).to_list(2000)
+    for d in docs:
+        d["variant_count"] = await db.costumes.count_documents({"group_id": d["id"]})
+    return docs
+
+
+@api_router.post("/groups", response_model=InventoryGroup)
+async def create_group(payload: GroupPayload):
+    now = _now_iso()
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Group name required")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "category": (payload.category or "").strip(),
+        "subcategory": (payload.subcategory or "").strip(),
+        "location": (payload.location or "").strip(),
+        "sub_location": (payload.sub_location or "").strip(),
+        "notes": (payload.notes or "").strip(),
+        "keywords": [k.strip() for k in (payload.keywords or []) if k and k.strip()],
+        "creator": (payload.creator or "").strip(),
+        "original_show_id": payload.original_show_id,
+        "additional_show_ids": list(payload.additional_show_ids or []),
+        "image_id": payload.image_id,
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.groups.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.get("/groups/{group_id}")
+async def get_group(group_id: str):
+    doc = await db.groups.find_one({"id": group_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Group not found")
+    variants = await db.costumes.find({"group_id": group_id}, {"_id": 0}).sort("variant_label", 1).to_list(500)
+    doc["variants"] = variants
+    doc["variant_count"] = len(variants)
+    doc["total_items"] = sum(v.get("total_quantity", 0) for v in variants)
+    return doc
+
+
+@api_router.put("/groups/{group_id}", response_model=InventoryGroup)
+async def update_group(group_id: str, payload: GroupPayload):
+    existing = await db.groups.find_one({"id": group_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Group not found")
+    updates = {
+        "name": payload.name.strip(),
+        "category": (payload.category or "").strip(),
+        "subcategory": (payload.subcategory or "").strip(),
+        "location": (payload.location or "").strip(),
+        "sub_location": (payload.sub_location or "").strip(),
+        "notes": (payload.notes or "").strip(),
+        "keywords": [k.strip() for k in (payload.keywords or []) if k and k.strip()],
+        "creator": (payload.creator or "").strip(),
+        "original_show_id": payload.original_show_id,
+        "additional_show_ids": list(payload.additional_show_ids or []),
+        "image_id": payload.image_id,
+        "updated_at": _now_iso(),
+    }
+    await db.groups.update_one({"id": group_id}, {"$set": updates})
+    doc = await db.groups.find_one({"id": group_id}, {"_id": 0})
+    return doc
+
+
+@api_router.delete("/groups/{group_id}")
+async def delete_group(group_id: str):
+    doc = await db.groups.find_one({"id": group_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Group not found")
+    await db.costumes.update_many({"group_id": group_id}, {"$set": {"group_id": None, "variant_label": ""}})
+    await db.groups.delete_one({"id": group_id})
+    return {"ok": True}
+
+
+@api_router.get("/inventory")
+async def list_inventory():
+    """Return mixed feed: groups collapsed, plus ungrouped costumes."""
+    groups = await db.groups.find({}, {"_id": 0}).to_list(2000)
+    entries = []
+    for g in groups:
+        variants = await db.costumes.find({"group_id": g["id"]}, {"_id": 0}).to_list(500)
+        entries.append({
+            "type": "group",
+            "id": g["id"],
+            "name": g["name"],
+            "category": g.get("category", ""),
+            "subcategory": g.get("subcategory", ""),
+            "location": g.get("location", ""),
+            "sub_location": g.get("sub_location", ""),
+            "image_id": g.get("image_id"),
+            "keywords": g.get("keywords", []),
+            "creator": g.get("creator", ""),
+            "variant_count": len(variants),
+            "total_items": sum(v.get("total_quantity", 0) for v in variants),
+            "updated_at": g.get("updated_at", ""),
+        })
+    ungrouped = await db.costumes.find(
+        {"$or": [{"group_id": None}, {"group_id": {"$exists": False}}]},
+        {"_id": 0}
+    ).to_list(2000)
+    for c in ungrouped:
+        entries.append({"type": "costume", **c})
+    entries.sort(key=lambda e: e.get("updated_at", ""), reverse=True)
+    return entries
+
 
 
 # --------- Shows Routes ---------

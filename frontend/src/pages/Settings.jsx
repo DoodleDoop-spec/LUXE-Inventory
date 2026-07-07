@@ -271,16 +271,16 @@ export default function Settings() {
       <section className="grid md:grid-cols-12 gap-8">
         <div className="md:col-span-4">
           <div className="eyebrow">STORAGE</div>
-          <h2 className="font-display text-xl font-semibold text-[#09090B] mt-2">Locations (nested)</h2>
+          <h2 className="font-display text-xl font-semibold text-[#09090B] mt-2">Locations</h2>
           <p className="text-sm text-[#71717A] mt-2">
             Nest locations indefinitely (e.g. Costume Closet A → A → 1).
           </p>
         </div>
         <div className="md:col-span-8 space-y-4">
           <form onSubmit={addRootLocation} className="flex gap-3">
-            <Input data-testid="settings-new-root-loc" placeholder="Root location (e.g. Costume Closet A)" value={newLocRoot} onChange={(e) => setNewLocRoot(e.target.value)} className="h-11 rounded-none border-[#E4E4E7]" />
+            <Input data-testid="settings-new-root-loc" placeholder="Location (e.g. Costume Closet A)" value={newLocRoot} onChange={(e) => setNewLocRoot(e.target.value)} className="h-11 rounded-none border-[#E4E4E7]" />
             <Button data-testid="settings-add-root-loc-btn" type="submit" className="bg-[#09090B] text-white hover:bg-[#27272A] rounded-none h-11 px-5">
-              <Plus className="h-4 w-4 mr-1" /> Add root
+              <Plus className="h-4 w-4 mr-1" /> Add location
             </Button>
           </form>
           <LocationTree locations={locations} onAdd={addChildLocation} onRename={renameLocation} onDelete={removeLocation} />

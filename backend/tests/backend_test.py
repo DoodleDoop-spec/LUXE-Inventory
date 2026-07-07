@@ -484,3 +484,143 @@ def test_costumes_default_sort_is_origin_year_desc(session):
         for s in shows:
             session.delete(f"{API}/shows/{s['id']}")
 
+
+
+# ==============================================================
+# Iteration 7 — Inventory Groups
+# ==============================================================
+class TestGroupsIteration7:
+    def test_group_full_flow(self, session):
+        # Create group
+        payload = {
+            "name": "TEST_Earring Set",
+            "category": "Accessories",
+            "location": "Test Loc",
+            "keywords": ["jewelry"],
+        }
+        r = session.post(f"{API}/groups", json=payload)
+        assert r.status_code == 200, r.text
+        g = r.json()
+        assert g["name"] == payload["name"]
+        assert g["category"] == "Accessories"
+        assert g["location"] == "Test Loc"
+        assert g["keywords"] == ["jewelry"]
+        assert "id" in g
+        gid = g["id"]
+
+        # List groups includes it with variant_count
+        r = session.get(f"{API}/groups")
+        assert r.status_code == 200
+        listed = r.json()
+        match = next((x for x in listed if x["id"] == gid), None)
+        assert match is not None
+        assert match.get("variant_count") == 0
+
+        # Get single group
+        r = session.get(f"{API}/groups/{gid}")
+        assert r.status_code == 200
+        gd = r.json()
+        assert gd["variants"] == []
+        assert gd["variant_count"] == 0
+        assert gd["total_items"] == 0
+
+        # Update
+        upd = dict(payload)
+        upd["name"] = "TEST_Earring Set Updated"
+        upd["location"] = "New Loc"
+        r = session.put(f"{API}/groups/{gid}", json=upd)
+        assert r.status_code == 200, r.text
+        assert r.json()["name"] == "TEST_Earring Set Updated"
+        assert r.json()["location"] == "New Loc"
+
+        # Create a costume assigned to this group via POST
+        cpayload = {
+            "name": "TEST_Red Earring",
+            "category": "Accessories",
+            "location": "Test Loc",
+            "sizes": {"S": 2},
+            "group_id": gid,
+            "variant_label": "Red",
+        }
+        r = session.post(f"{API}/costumes", json=cpayload)
+        assert r.status_code == 200, r.text
+        c = r.json()
+        assert c["group_id"] == gid
+        assert c["variant_label"] == "Red"
+        cid = c["id"]
+
+        # Verify on GET
+        r = session.get(f"{API}/costumes/{cid}")
+        assert r.status_code == 200
+        assert r.json()["group_id"] == gid
+        assert r.json()["variant_label"] == "Red"
+
+        # Create another via PUT assignment (start ungrouped)
+        r = session.post(f"{API}/costumes", json={
+            "name": "TEST_Blue Earring",
+            "category": "Accessories",
+            "location": "Test Loc",
+            "sizes": {"M": 3},
+        })
+        assert r.status_code == 200
+        cid2 = r.json()["id"]
+        assert r.json().get("group_id") in (None, "")
+        r = session.put(f"{API}/costumes/{cid2}", json={"group_id": gid, "variant_label": "Blue"})
+        assert r.status_code == 200
+        assert r.json()["group_id"] == gid
+        assert r.json()["variant_label"] == "Blue"
+
+        # GET group shows both variants
+        r = session.get(f"{API}/groups/{gid}")
+        assert r.status_code == 200
+        gd = r.json()
+        assert gd["variant_count"] == 2
+        assert gd["total_items"] == 5  # 2 + 3
+        labels = {v["variant_label"] for v in gd["variants"]}
+        assert labels == {"Red", "Blue"}
+
+        # /api/inventory mixed feed
+        r = session.get(f"{API}/inventory")
+        assert r.status_code == 200
+        feed = r.json()
+        group_entry = next((e for e in feed if e.get("type") == "group" and e.get("id") == gid), None)
+        assert group_entry is not None
+        assert group_entry["variant_count"] == 2
+        assert group_entry["total_items"] == 5
+        # Grouped costumes should NOT appear as separate type=costume entries
+        assert not any(e.get("type") == "costume" and e.get("id") in (cid, cid2) for e in feed)
+
+        # Delete group -> costumes get group_id=null
+        r = session.delete(f"{API}/groups/{gid}")
+        assert r.status_code == 200
+        r = session.get(f"{API}/groups/{gid}")
+        assert r.status_code == 404
+        for cc in (cid, cid2):
+            r = session.get(f"{API}/costumes/{cc}")
+            assert r.status_code == 200
+            assert r.json().get("group_id") in (None, "")
+            # cleanup
+            session.delete(f"{API}/costumes/{cc}")
+
+    def test_inventory_includes_ungrouped_costume(self, session):
+        r = session.post(f"{API}/costumes", json={
+            "name": "TEST_Ungrouped",
+            "category": "Accessories",
+            "location": "Test Loc",
+            "sizes": {"S": 1},
+        })
+        assert r.status_code == 200
+        cid = r.json()["id"]
+        try:
+            r = session.get(f"{API}/inventory")
+            assert r.status_code == 200
+            feed = r.json()
+            found = next((e for e in feed if e.get("type") == "costume" and e.get("id") == cid), None)
+            assert found is not None
+        finally:
+            session.delete(f"{API}/costumes/{cid}")
+
+    def test_create_group_requires_name(self, session):
+        r = session.post(f"{API}/groups", json={"name": "  "})
+        assert r.status_code == 400
+

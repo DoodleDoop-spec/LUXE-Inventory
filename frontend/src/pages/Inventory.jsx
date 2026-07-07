@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { api } from "@/lib/api";
-import { Plus, Search, LayoutGrid, List, X, MapPin, ChevronRight, Flag, StickyNote, SlidersHorizontal, ArrowUpDown, Calendar, Image as ImageIcon } from "lucide-react";
+import { Plus, Search, LayoutGrid, List, X, MapPin, ChevronRight, Flag, StickyNote, SlidersHorizontal, ArrowUpDown, Calendar, Image as ImageIcon, Package } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -43,6 +43,7 @@ export default function Inventory() {
   const [locations, setLocations] = useState([]);
   const [sizingSystems, setSizingSystems] = useState([]);
   const [shows, setShows] = useState([]);
+  const [groups, setGroups] = useState([]);
   const [q, setQ] = useState("");
   const [category, setCategory] = useState(ALL);
   const [subcategory, setSubcategory] = useState(ALL);
@@ -103,18 +104,20 @@ export default function Inventory() {
       if (showFilter !== ALL) params.show_id = showFilter;
       if (flaggedOnly) params.flagged = true;
       params.sort = sort;
-      const [c, cats, locs, systems, sh] = await Promise.all([
+      const [c, cats, locs, systems, sh, grs] = await Promise.all([
         api.get("/costumes", { params }),
         api.get("/categories"),
         api.get("/locations"),
         api.get("/sizing-systems"),
         api.get("/shows"),
+        api.get("/groups"),
       ]);
       setCostumes(c.data);
       setCategories(cats.data);
       setLocations(locs.data);
       setSizingSystems(systems.data);
       setShows(sh.data);
+      setGroups(grs.data);
     } catch (e) {
       console.error(e);
       toast.error("Failed to load inventory");
@@ -175,7 +178,7 @@ export default function Inventory() {
         <div className="space-y-2">
           <div className="eyebrow">INVENTORY</div>
           <h1 className="font-display text-4xl sm:text-5xl tracking-tight font-bold text-[#09090B]">
-            All Inventory
+            Inventory
           </h1>
           <p className="text-sm text-[#71717A]">{costumes.length} {costumes.length === 1 ? "item" : "items"} found</p>
         </div>
@@ -198,6 +201,24 @@ export default function Inventory() {
               <List className="h-4 w-4" />
             </button>
           </div>
+          <Button
+            data-testid="new-group-btn"
+            onClick={async () => {
+              const name = window.prompt("New group name?");
+              if (!name || !name.trim()) return;
+              try {
+                const r = await api.post("/groups", { name: name.trim() });
+                toast.success("Group created");
+                navigate(`/group/${r.data.id}`);
+              } catch (err) {
+                toast.error(err.response?.data?.detail || "Failed to create group");
+              }
+            }}
+            variant="outline"
+            className="rounded-none border-[#09090B] h-10"
+          >
+            <Package className="h-4 w-4 mr-1" />New Group
+          </Button>
           <Button data-testid="add-costume-btn" onClick={handleNew} className="bg-[#09090B] hover:bg-[#27272A] rounded-none text-white h-10">
             <Plus className="h-4 w-4 mr-1" />Add Costume
           </Button>
@@ -357,6 +378,38 @@ export default function Inventory() {
         )}
       </div>
 
+      {/* Groups strip */}
+      {groups.length > 0 && (
+        <section className="space-y-3" data-testid="groups-strip">
+          <div className="flex items-center gap-2">
+            <Package className="h-4 w-4 text-[#71717A]" />
+            <span className="eyebrow">GROUPS ({groups.length})</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+            {groups.map((g) => (
+              <Link
+                key={g.id}
+                to={`/group/${g.id}`}
+                data-testid={`group-card-${g.id}`}
+                className="bg-white border border-[#E4E4E7] p-4 hover:border-[#09090B] transition-colors"
+              >
+                <div className="aspect-square image-empty overflow-hidden mb-3 flex items-center justify-center relative">
+                  {g.image_id ? (
+                    <img src={`${process.env.REACT_APP_BACKEND_URL}/api/images/${g.image_id}`} alt={g.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <Package className="h-8 w-8 text-[#A1A1AA]" />
+                  )}
+                  <div className="absolute top-1.5 left-1.5 bg-[#09090B] text-white px-1.5 py-0.5 text-[9px] font-mono-label">GROUP</div>
+                </div>
+                <div className="eyebrow text-[10px] truncate">{g.category || "—"}</div>
+                <div className="font-display font-semibold text-sm text-[#09090B] truncate mt-0.5">{g.name}</div>
+                <div className="text-xs text-[#71717A] mt-1 tabular-nums">{g.variant_count || 0} variant{g.variant_count === 1 ? "" : "s"}</div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* Results */}
       {loading ? (
         <div className="py-20 text-center eyebrow">LOADING…</div>
@@ -389,6 +442,7 @@ export default function Inventory() {
         locations={locations}
         sizingSystems={sizingSystems}
         shows={shows}
+        groups={groups}
         onSaved={handleSaved}
       />
     </div>

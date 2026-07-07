@@ -15,7 +15,7 @@ import { toast } from "sonner";
 import { Upload, Image as ImageIcon, X, StickyNote, Flag, Plus } from "lucide-react";
 
 export default function CostumeFormDialog({
-  open, onOpenChange, editing, categories, locations, sizingSystems, shows, onSaved,
+  open, onOpenChange, editing, categories, locations, sizingSystems, shows, groups, onSaved,
 }) {
   const [name, setName] = useState("");
   const [category, setCategory] = useState("");
@@ -40,6 +40,8 @@ export default function CostumeFormDialog({
   const [additionalShowIds, setAdditionalShowIds] = useState([]);
   const [keywords, setKeywords] = useState([]);
   const [kwInput, setKwInput] = useState("");
+  const [groupId, setGroupId] = useState("");
+  const [variantLabel, setVariantLabel] = useState("");
   const fileRef = useRef(null);
 
   const currentSystem = useMemo(
@@ -125,6 +127,8 @@ export default function CostumeFormDialog({
       setOriginalShowId(editing.original_show_id || "");
       setAdditionalShowIds(editing.additional_show_ids || []);
       setKeywords(editing.keywords || []);
+      setGroupId(editing.group_id || "");
+      setVariantLabel(editing.variant_label || "");
     } else {
       setName(""); setCategory(""); setNewCategory("");
       setSystemName("Letter");
@@ -139,6 +143,8 @@ export default function CostumeFormDialog({
       setOriginalShowId("");
       setAdditionalShowIds([]);
       setKeywords([]);
+      setGroupId("");
+      setVariantLabel("");
     }
     setOpenSizeNote(null);
     setKwInput("");
@@ -561,6 +567,33 @@ export default function CostumeFormDialog({
               />
             </div>
             <p className="text-xs text-[#A1A1AA]">Press Enter or comma to add. Backspace removes last.</p>
+          </div>
+
+          {/* Group assignment */}
+          <div className="border border-[#E4E4E7] p-4 space-y-2">
+            <Label className="eyebrow">INVENTORY GROUP</Label>
+            <div className="grid md:grid-cols-2 gap-2">
+              <Select value={groupId || "__none__"} onValueChange={(v) => setGroupId(v === "__none__" ? "" : v)}>
+                <SelectTrigger data-testid="form-group" className="rounded-none border-[#E4E4E7] h-11">
+                  <SelectValue placeholder="No group" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">— No group —</SelectItem>
+                  {(groups || []).map((g) => (
+                    <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input
+                data-testid="form-variant-label"
+                value={variantLabel}
+                onChange={(e) => setVariantLabel(e.target.value)}
+                placeholder="Variant label (e.g. Red, Blue)"
+                disabled={!groupId}
+                className="rounded-none border-[#E4E4E7] h-11"
+              />
+            </div>
+            <p className="text-xs text-[#A1A1AA]">Assign this piece to a group of variants (same item, different colors, etc.).</p>
           </div>
 
           {/* Flag */}

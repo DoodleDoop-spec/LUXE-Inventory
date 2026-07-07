@@ -68,9 +68,9 @@ export default function CostumeDetail() {
 
   return (
     <div className="space-y-10" data-testid="costume-detail-page">
-      <Link to="/inventory" data-testid="back-link" className="inline-flex items-center text-sm text-[#71717A] hover:text-[#09090B]">
-        <ArrowLeft className="h-4 w-4 mr-1" /> Back to Inventory
-      </Link>
+      <button type="button" data-testid="back-link" onClick={() => navigate(-1)} className="inline-flex items-center text-sm text-[#71717A] hover:text-[#09090B]">
+        <ArrowLeft className="h-4 w-4 mr-1" /> Back
+      </button>
 
       {costume.is_flagged && (
         <div className="border border-[#EF4444] bg-[#FEF2F2] p-5" data-testid="detail-flag-banner">
