@@ -76,9 +76,17 @@ without the need for coding experience.
   - Shows page: replaced `gap-px bg-[#E4E4E7]` grid seams with `gap-6` + per-card borders — no more grey box under each year.
   - Default costume sort is now **`origin_year_desc` (Most recently used)** on both Inventory and the Dashboard "Most recently used" section. Sort labels simplified (Most recently used / Oldest first / Recently updated / Name A→Z / Total qty ↓).
 
+- **Iteration 7 (partial — inventory groups + polish)**:
+  - **Inventory groups**: new `Group` model + CRUD (`/api/groups*`), `/api/inventory` mixed feed. Costume gets `group_id` + `variant_label`. New Group Detail page (`/group/:id`) with variants list, Groups strip on Inventory page, "New Group" button, and group-assignment section in the costume form dialog.
+  - "All Inventory" → "Inventory"; nav "Locations" label → "Storage" (icon unchanged); Settings "Locations (nested)" → "Locations", "Add root" → "Add location"; back-button on Costume Detail uses `navigate(-1)` (returns to previous page instead of always /inventory).
+  - **Bug fix (found + fixed by testing agent)**: `CostumeBase`/`CostumeUpdate` were missing `group_id`/`variant_label`, causing every POST /api/costumes to 500 and silently dropping group assignment on PUT.
+
 ## Status
-- Backend: 17/17 pytest tests pass (iter-5 + iter-6)
-- Frontend: 100% of iter-6 spec verified by testing agent
+- Backend: 20/20 tests pass (iter-7 + regressions)
+- Frontend: all iter-7 flows verified via Playwright
+
+## Deferred from user's iter-7 request (large list — need prioritization)
+Remaining unshipped items from the 24-item request: uploadable logo/org name in header, custom flag categories + Flags tab, category color coding, drag-and-drop movement, category merging, similar-category warnings, image uploads for notes/flags, "Currently In Use" costumes on dashboard, YouTube/Vimeo timestamp URL rewriting for show video links, quick-add costume to a show from show page, add-show from shows page, mobile responsiveness polish, condense search into magnifying-glass icon, "costume/accessories" wording sweep, buy-link for creator + link-to-show for shows, in-form creation of categories/subcategories/locations/sub-locations/shows, header spacing fixes.
 
 ## Backlog (Next)
 - P1: Bulk import (CSV) / export costumes
