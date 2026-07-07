@@ -484,7 +484,7 @@ export default function CostumeFormDialog({
                   <SelectValue placeholder="Select category" />
                 </SelectTrigger>
                 <SelectContent>
-                  {categories.map((c) => (
+                  {Array.from(new Map(categories.map((c) => [c.name, c])).values()).map((c) => (
                     <SelectItem key={c.id} value={c.name}>{c.name}</SelectItem>
                   ))}
                   <SelectItem value="__new__">+ Add new category…</SelectItem>

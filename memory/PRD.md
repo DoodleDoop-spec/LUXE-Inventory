@@ -5,62 +5,62 @@ A proprietary internal tracking system for costumes/accessories with location tr
 
 ## User personas
 - **Wardrobe manager** — primary user; adds, edits, flags costumes; manages storage locations, shows and flag types.
-- **Assistant / helper** — searches inventory, moves items via drag & drop, checks what is flagged.
+- **Assistant / helper** — searches inventory, moves items via drag & drop, checks what is flagged or in use.
 
 ## Core requirements (stable)
 - Track costumes / accessories with sizes, quantity per size, hierarchical storage locations, hierarchical categories, and shows they appear in.
 - Non-coding management of taxonomy (categories, subcategories, sizing systems, storage tree, shows, flag types).
 - Robust search and sort (keywords, name, category, location, origin year).
+- Drag & drop reorganisation. Color coding. Multi-flag system. Currently-in-use awareness.
 
 ## Implemented (running log)
 
-### Iteration 1–7 (baseline app, prior sessions)
+### Iteration 1–7 (baseline)
 - FastAPI + MongoDB backend, React + Tailwind + shadcn/ui frontend.
 - CRUD: Costumes, Categories (with nested subcategories), Locations (hierarchical tree), Shows (grouped by year), Groups (variants), Sizing systems, Settings.
-- Rich costume form with sizes + per-size notes, keywords, creator, original show, additional shows, group + variant label.
-- Inventory grid/list with filters, sort by origin year, group cards, image uploads.
-- Legacy single-flag system (is_flagged + flag_reason).
-- Origin year auto-derived from original show year.
+- Costume form with sizes + per-size notes, keywords, creator, original show, additional shows, group + variant label.
+- Inventory grid/list with filters, sort by origin year.
 
-### Iteration 8 — Feb 2026 (this session)
-- **Dynamic branding**: `settings.org_name` + `settings.logo_image_id`. Navbar shows uploaded logo or two-letter initials fallback; Dashboard title uses org name; footer uses it too.
-- **Flag system**:
-  - `/api/flag-categories` CRUD (seeded: On Loan, Needs Repair, In Cleaning).
-  - Costume `flags: [{id, category_id, note, created_at}]` array; legacy `is_flagged`/`flag_reason` kept in sync automatically.
-  - New Flags tab (`/flags`) — manage flag types, view all costumes per flag.
-  - `/api/costumes/{id}/flags` attach / update / detach single flag.
-- **Add Show from Shows page** — Shows tab has `+ Add Show` dialog (name, year, watch link, cover photo, notes).
-- **Quick-attach costumes to a Show** — ShowDetail has picker to multi-select from existing inventory; adds show to their `additional_show_ids`.
-- **Color-coded categories** — per-category color (preset swatches + custom color picker) surfaced next to category name in cards, list rows and detail view.
-- **Wording sweep**: "costumes / accessories" phrasing in placeholders, sub-copy and picker labels. Dashboard tile relabeled "Total Items"; Add button reads "Add Item".
-- **buy_link on Costume** — link-to-buy field in form; shown as pill on CostumeDetail.
-- **show_link on Show** — link-to-watch field in Shows form + Settings edit; shown as "Watch this show" button on ShowDetail.
-- **Drag & drop on Inventory** — costume cards are draggable; on dragstart a bottom `dnd-dock` reveals category + location chips; drop reassigns via PUT `/api/costumes/{id}` (category+subcategory or location+sub_location).
+### Iteration 8 — Feb 2026
+- Dynamic branding (org name + logo).
+- Flag system (multi-flag per costume, /flags tab).
+- Add-Show + attach-costumes UX.
+- Color-coded categories.
+- Costume `buy_link` + Show `show_link`.
+- Wording sweep to "costumes / accessories".
+- Drag & drop on Inventory.
+
+### Iteration 9 — Feb 2026 (this session)
+- **Inline entity creation from Costume form** — create new subcategory, storage location, or show without leaving the modal. Similar-category detector shows one-click "Use existing X" chips when a fuzzy match is found.
+- **Collapsible global search** — magnifying-glass icon expands into a search input; auto-collapses when empty.
+- **Image attachments in notes and per-flag notes** — multiple images per costume note and per attached flag; previewed inline on CostumeDetail.
+- **Video-timestamp support** — Show has `link_timestamp` (accepts `HH:MM:SS`, `MM:SS`, or seconds). ShowDetail "Watch this show" link auto-rewrites for YouTube (`?t=Xs`) and Vimeo (`#t=XmXs`).
+- **Currently in use** state — per-costume toggle + optional note + timestamp. Dashboard shows a green "IN USE" tile + section, inventory cards get an in-use badge, detail view gets a green banner.
+- **Category merge** — Settings has a merge tool: pick a keeper and a donor category; all costumes are migrated and the donor is deleted.
+- **Legacy-flag migration** — one-click migration in Settings converts old `is_flagged` costumes into a `Legacy` flag category.
+- **Duplicate-category suggestion** — inline warning when adding a new category with a name similar to an existing one.
+- **Mobile polish** — hamburger nav on <md screens with a mobile drawer, responsive main content padding, collapsible search icon on all breakpoints.
+- **Deduplicated category dropdowns** — legacy duplicate-name categories no longer crash Radix Select.
 
 ## Backlog
 
-### P0 (next up)
-- **Inline entity creation from Costume form** — create new category/subcategory/storage location/show without leaving the form.
-- **Search UI condense** — collapse global search into a magnifying-glass icon that expands on click.
-- **Image uploads in notes and flag notes**.
-
+### P0 — none pending
 ### P1
-- **Video timestamp** — accept optional timestamp for show_link and rewrite YouTube/Vimeo URL.
-- **"Currently in use" state** — a per-costume state distinct from flags; prominently surfaced on Dashboard.
-- **Category-duplicate suggestion** — non-aggressive toast when creating a category with a similar name.
-- **Merge categories** — settings action to merge cat A into cat B (retaining chosen name).
-- **Mobile-first pass** — layout polish for handhelds.
-- **Data migration** — convert existing legacy flagged costumes into a default "Legacy" flag category so they show up in the Flags tab.
+- **Image editing** (crop / rotate) inside upload flow.
+- **Batch actions** on inventory list (bulk assign, bulk flag, bulk in-use).
+- **Print / share** a show's costume manifest.
+- **Persistent filters** (URL sync) on Inventory.
 
-### P2 / Nice-to-have
-- Backend router split (server.py is ~1400 lines).
-- Hex validation for category color update.
+### P2
+- Backend router split (`server.py` ~1500 lines).
+- Hex validation on category color.
+- Debounce `/categories/similar` on server side.
 - Aggregation-pipeline delete for flag category cascade.
 
 ## Test status
-- Iteration 8 backend: 27/27 pytest tests passing (7 new for this iter).
-- Iteration 8 frontend: all key testids verified live via Playwright.
-- Known non-blocking: legacy is_flagged rows do not appear in flag category buckets.
+- Iteration 9 backend: 35/35 pytest tests passing (8 new for this iteration, on top of iter-8's 27).
+- Iteration 9 frontend: all key testids verified live via Playwright at desktop and mobile viewports.
+- No known blocking issues.
 
 ## Test credentials
 None required (no auth).
