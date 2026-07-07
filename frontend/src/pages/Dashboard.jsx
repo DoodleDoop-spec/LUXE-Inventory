@@ -1,27 +1,30 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
-import { Boxes, Package, Tag, ArrowUpRight, Plus, Flag } from "lucide-react";
+import { Package, Tag, ArrowUpRight, Plus, Flag, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [recent, setRecent] = useState([]);
   const [flagged, setFlagged] = useState([]);
+  const [inUse, setInUse] = useState([]);
   const [orgName, setOrgName] = useState("LUXE");
 
   useEffect(() => {
     (async () => {
       try {
-        const [s, r, f, settings] = await Promise.all([
+        const [s, r, f, iu, settings] = await Promise.all([
           api.get("/stats"),
           api.get("/costumes", { params: { sort: "origin_year_desc" } }),
           api.get("/flagged"),
+          api.get("/in-use"),
           api.get("/settings"),
         ]);
         setStats(s.data);
         setRecent(r.data.slice(0, 8));
         setFlagged(f.data);
+        setInUse(iu.data);
         setOrgName((settings.data.org_name || "LUXE").trim() || "LUXE");
       } catch (e) { console.error(e); }
     })();
@@ -29,9 +32,9 @@ export default function Dashboard() {
 
   const tiles = [
     { label: "Total Items", value: stats?.total_costumes ?? "—", icon: Package, testId: "stat-total-costumes" },
-    { label: "Total Units", value: stats?.total_items ?? "—", icon: Boxes, testId: "stat-total-items" },
+    { label: "In Use", value: stats?.in_use_count ?? 0, icon: Sparkles, testId: "stat-in-use", accent: (stats?.in_use_count || 0) > 0 },
     { label: "Categories", value: stats?.category_count ?? "—", icon: Tag, testId: "stat-categories" },
-    { label: "Flagged", value: stats?.flagged_count ?? 0, icon: Flag, testId: "stat-flagged" },
+    { label: "Flagged", value: stats?.flagged_count ?? 0, icon: Flag, testId: "stat-flagged", danger: (stats?.flagged_count || 0) > 0 },
   ];
 
   return (
@@ -62,18 +65,71 @@ export default function Dashboard() {
       <div className="divider-thick" />
 
       <section className="grid grid-cols-2 md:grid-cols-4 gap-px bg-[#E4E4E7] border border-[#E4E4E7]">
-        {tiles.map(({ label, value, icon: Icon, testId }) => (
-          <div key={label} data-testid={testId} className="bg-white p-6 md:p-8 flex flex-col justify-between min-h-[160px]">
+        {tiles.map(({ label, value, icon: Icon, testId, accent, danger }) => (
+          <div
+            key={label}
+            data-testid={testId}
+            className={`p-6 md:p-8 flex flex-col justify-between min-h-[160px] ${
+              danger ? "bg-[#FEF2F2]" : accent ? "bg-[#ECFDF5]" : "bg-white"
+            }`}
+          >
             <div className="flex items-center justify-between">
-              <span className="eyebrow">{label}</span>
-              <Icon className="h-4 w-4 text-[#71717A]" strokeWidth={2} />
+              <span className={`eyebrow ${danger ? "text-[#B91C1C]" : accent ? "text-[#059669]" : ""}`}>{label}</span>
+              <Icon
+                className={`h-4 w-4 ${danger ? "text-[#EF4444]" : accent ? "text-[#10B981]" : "text-[#71717A]"}`}
+                strokeWidth={2}
+                fill={danger && Icon === Flag ? "currentColor" : "none"}
+              />
             </div>
-            <div className="font-display text-5xl font-bold tracking-tight tabular-nums text-[#09090B] mt-6">
+            <div className={`font-display text-5xl font-bold tracking-tight tabular-nums mt-6 ${
+              danger ? "text-[#7F1D1D]" : accent ? "text-[#065F46]" : "text-[#09090B]"
+            }`}>
               {value}
             </div>
           </div>
         ))}
       </section>
+
+      {inUse.length > 0 && (
+        <section data-testid="in-use-section" className="border border-[#10B981] bg-[#ECFDF5]">
+          <div className="p-5 md:p-6 border-b border-[#6EE7B7] flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Sparkles className="h-5 w-5 text-[#059669]" />
+              <div>
+                <div className="eyebrow text-[#065F46]">CURRENTLY IN USE</div>
+                <h2 className="font-display text-lg font-semibold text-[#064E3B] mt-1">
+                  {inUse.length} {inUse.length === 1 ? "piece is" : "pieces are"} on stage right now
+                </h2>
+              </div>
+            </div>
+          </div>
+          <div className="divide-y divide-[#6EE7B7]">
+            {inUse.map((c) => (
+              <Link
+                key={c.id}
+                to={`/costume/${c.id}`}
+                data-testid={`in-use-${c.id}`}
+                className="flex items-center gap-4 px-5 md:px-6 py-3 hover:bg-[#D1FAE5]"
+              >
+                <div className="w-10 h-10 image-empty overflow-hidden border border-[#6EE7B7] shrink-0 flex items-center justify-center">
+                  {c.image_id ? (
+                    <img src={`${process.env.REACT_APP_BACKEND_URL}/api/images/${c.image_id}`} alt={c.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <Sparkles className="h-4 w-4 text-[#10B981]" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium text-[#064E3B] truncate">{c.name}</div>
+                  <div className="text-xs text-[#065F46] truncate">{c.in_use_note || `${c.category}${c.subcategory ? ` · ${c.subcategory}` : ""}`}</div>
+                </div>
+                <div className="text-xs text-[#065F46] shrink-0 hidden sm:block tabular-nums">
+                  {c.in_use_since ? new Date(c.in_use_since).toLocaleDateString() : ""}
+                </div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
 
       {flagged.length > 0 && (
         <section data-testid="flagged-section" className="border border-[#EF4444] bg-[#FEF2F2]">

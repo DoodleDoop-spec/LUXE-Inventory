@@ -802,3 +802,178 @@ class TestIteration8:
         got = next(x for x in session.get(f"{API}/shows").json() if x["id"] == s["id"])
         assert got["show_link"] == "https://youtu.be/xyz"
         session.delete(f"{API}/shows/{s['id']}")
+
+
+# ==============================================================
+# Iteration 9 — merge, similar, migrate-legacy-flags, in-use, note images, show timestamp, flag images
+# ==============================================================
+class TestIteration9:
+    def test_similar_categories_empty_returns_empty(self, session):
+        r = session.get(f"{API}/categories/similar", params={"name": ""})
+        assert r.status_code == 200
+        assert r.json() == []
+
+    def test_similar_categories_fuzzy_match(self, session):
+        name = f"TEST_SIM_{uuid.uuid4().hex[:6]}"
+        cat = session.post(f"{API}/categories", json={"name": name}).json()
+        try:
+            # Query with a slight typo (drop last char + swap)
+            typo = name[:-1]
+            r = session.get(f"{API}/categories/similar", params={"name": typo})
+            assert r.status_code == 200
+            names = [x["name"] for x in r.json()]
+            assert cat["name"] in names
+        finally:
+            session.delete(f"{API}/categories/{cat['id']}")
+
+    def test_categories_merge_full_flow(self, session):
+        k = session.post(f"{API}/categories", json={"name": f"TEST_KEEP_{uuid.uuid4().hex[:6]}"}).json()
+        d = session.post(f"{API}/categories", json={"name": f"TEST_DISC_{uuid.uuid4().hex[:6]}"}).json()
+        # add a subcat to discard
+        session.post(f"{API}/categories/{d['id']}/subcategories", json={"name": "Sub1"})
+        subs = _get_cat(session, d["id"])["subcategories"]
+        sub_name = subs[0]["name"]
+        # create a costume under discard with subcategory
+        c = session.post(f"{API}/costumes", json={
+            "name": f"TEST_MG_{uuid.uuid4().hex[:6]}", "category": d["name"],
+            "subcategory": sub_name, "location": "Main Wardrobe", "sizes": {"S": 1},
+        }).json()
+        try:
+            # same-id => 400
+            r = session.post(f"{API}/categories/merge", json={"keeper_id": k["id"], "discard_id": k["id"]})
+            assert r.status_code == 400
+            # unknown => 404
+            r = session.post(f"{API}/categories/merge", json={"keeper_id": k["id"], "discard_id": "nonexistent"})
+            assert r.status_code == 404
+
+            # valid merge
+            r = session.post(f"{API}/categories/merge", json={"keeper_id": k["id"], "discard_id": d["id"]})
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["ok"] is True
+            assert body["keeper"] == k["name"]
+            assert body["discarded"] == d["name"]
+            assert body["moved"] >= 1
+
+            # discard category is deleted
+            r = session.get(f"{API}/categories")
+            assert not any(x["id"] == d["id"] for x in r.json())
+            # costume moved
+            got = session.get(f"{API}/costumes/{c['id']}").json()
+            assert got["category"] == k["name"]
+            assert got.get("subcategory", "") == ""
+        finally:
+            session.delete(f"{API}/costumes/{c['id']}")
+            session.delete(f"{API}/categories/{k['id']}")
+            session.delete(f"{API}/categories/{d['id']}")
+
+    def test_migrate_legacy_flags(self, session):
+        # Create a legacy is_flagged costume with empty flags array via raw payload
+        c = session.post(f"{API}/costumes", json={
+            "name": f"TEST_LEGF_{uuid.uuid4().hex[:6]}", "category": "Modern",
+            "location": "Main Wardrobe", "sizes": {"S": 1},
+        }).json()
+        # Force is_flagged via mongo direct isn't available in session; instead use PUT to try to set
+        # Use direct mongo via fixture
+        client = MongoClient(MONGO_URL)
+        db = client[DB_NAME]
+        db.costumes.update_one({"id": c["id"]}, {"$set": {"is_flagged": True, "flag_reason": "legacy on loan", "flags": []}})
+        client.close()
+        try:
+            r = session.post(f"{API}/admin/migrate-legacy-flags")
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["ok"] is True
+            assert body["migrated"] >= 1
+            assert body["legacy_category_id"]
+            # verify costume now has a flag
+            got = session.get(f"{API}/costumes/{c['id']}").json()
+            assert len(got["flags"]) == 1
+            assert got["flags"][0]["category_id"] == body["legacy_category_id"]
+            # Legacy category exists
+            fcs = session.get(f"{API}/flag-categories").json()
+            assert any(fc["name"] == "Legacy" for fc in fcs)
+        finally:
+            session.delete(f"{API}/costumes/{c['id']}")
+
+    def test_stats_has_in_use_count(self, session):
+        r = session.get(f"{API}/stats")
+        assert r.status_code == 200
+        assert "in_use_count" in r.json()
+
+    def test_in_use_endpoint_and_roundtrip(self, session):
+        c = session.post(f"{API}/costumes", json={
+            "name": f"TEST_INUSE_{uuid.uuid4().hex[:6]}", "category": "Modern",
+            "location": "Main Wardrobe", "sizes": {"S": 1},
+            "in_use": True, "in_use_note": "on stage",
+            "note_image_ids": ["nimg1", "nimg2"],
+        }).json()
+        try:
+            assert c["in_use"] is True
+            assert c["in_use_note"] == "on stage"
+            assert c.get("in_use_since")
+            assert c["note_image_ids"] == ["nimg1", "nimg2"]
+
+            r = session.get(f"{API}/in-use")
+            assert r.status_code == 200
+            assert any(x["id"] == c["id"] for x in r.json())
+
+            # turn off
+            r = session.put(f"{API}/costumes/{c['id']}", json={"in_use": False})
+            assert r.status_code == 200
+            got = r.json()
+            assert got["in_use"] is False
+            assert got.get("in_use_since") in (None, "")
+            # no longer in in-use list
+            r = session.get(f"{API}/in-use")
+            assert not any(x["id"] == c["id"] for x in r.json())
+
+            # stats reflects
+            stats = session.get(f"{API}/stats").json()
+            assert isinstance(stats["in_use_count"], int)
+        finally:
+            session.delete(f"{API}/costumes/{c['id']}")
+
+    def test_flag_image_ids_crud(self, session):
+        fcs = session.get(f"{API}/flag-categories").json()
+        fc = next(c for c in fcs if c["name"] == "On Loan")
+        c = session.post(f"{API}/costumes", json={
+            "name": f"TEST_FLIMG_{uuid.uuid4().hex[:6]}", "category": "Modern",
+            "location": "Main Wardrobe", "sizes": {"S": 1},
+            "flags": [{"category_id": fc["id"], "note": "n1", "image_ids": ["a", "b"]}]
+        }).json()
+        try:
+            assert c["flags"][0]["image_ids"] == ["a", "b"]
+            # POST attach with image_ids
+            fc2 = next(x for x in fcs if x["name"] == "Needs Repair")
+            r = session.post(f"{API}/costumes/{c['id']}/flags",
+                             json={"category_id": fc2["id"], "note": "n2", "image_ids": ["x"]})
+            assert r.status_code == 200
+            flag2 = next(f for f in r.json()["flags"] if f["note"] == "n2")
+            assert flag2["image_ids"] == ["x"]
+            # PUT update image_ids
+            r = session.put(f"{API}/costumes/{c['id']}/flags/{flag2['id']}",
+                            json={"image_ids": ["x", "y", "z"]})
+            assert r.status_code == 200
+            updated = next(f for f in r.json()["flags"] if f["id"] == flag2["id"])
+            assert updated["image_ids"] == ["x", "y", "z"]
+        finally:
+            session.delete(f"{API}/costumes/{c['id']}")
+
+    def test_show_link_timestamp_persists(self, session):
+        r = session.post(f"{API}/shows", json={
+            "name": f"TEST_TS_{uuid.uuid4().hex[:6]}", "year": 2020,
+            "show_link": "https://youtu.be/abc", "link_timestamp": "1:23",
+        })
+        assert r.status_code == 200, r.text
+        s = r.json()
+        assert s["link_timestamp"] == "1:23"
+        r = session.put(f"{API}/shows/{s['id']}", json={
+            "name": s["name"], "year": 2020, "show_link": "https://youtu.be/abc",
+            "link_timestamp": "2:00",
+        })
+        assert r.status_code == 200
+        assert r.json()["link_timestamp"] == "2:00"
+        got = next(x for x in session.get(f"{API}/shows").json() if x["id"] == s["id"])
+        assert got["link_timestamp"] == "2:00"
+        session.delete(f"{API}/shows/{s['id']}")

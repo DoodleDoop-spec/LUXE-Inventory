@@ -8,6 +8,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { buildTimestampedUrl } from "@/lib/videoLink";
 
 export default function ShowDetail() {
   const { id } = useParams();
@@ -152,13 +153,13 @@ export default function ShowDetail() {
           <div className="flex items-center gap-3 flex-wrap mt-5">
             {show.show_link && (
               <a
-                href={show.show_link}
+                href={buildTimestampedUrl(show.show_link, show.link_timestamp)}
                 target="_blank"
                 rel="noreferrer"
                 data-testid="show-watch-link"
                 className="inline-flex items-center gap-1.5 h-10 px-4 border border-[#09090B] text-[#09090B] text-sm hover:bg-[#F4F4F5]"
               >
-                <ExternalLink className="h-4 w-4" /> Watch this show
+                <ExternalLink className="h-4 w-4" /> Watch this show{show.link_timestamp ? ` @ ${show.link_timestamp}` : ""}
               </a>
             )}
             <Button

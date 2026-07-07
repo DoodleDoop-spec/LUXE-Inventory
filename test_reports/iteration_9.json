@@ -1,0 +1,35 @@
+{
+  "summary": "Iteration 9 (LUXE Inventory) — all P0/P1 backend features verified via 8 new TestIteration9 pytest cases. Full suite: 35/35 pass (7 iter8 + 8 iter9 + 20 legacy). Backend endpoints POST /api/categories/merge (400 same-id, 404 unknown, moves costumes+clears subcat, deletes discard), GET /api/categories/similar (empty→[], fuzzy match works, returns similarity score, excludes self), POST /api/admin/migrate-legacy-flags (creates Legacy flag cat, converts is_flagged+empty-flags→flags array), GET /api/in-use (only in_use=True, sorted by in_use_since desc), /api/stats now includes in_use_count, Costume model accepts note_image_ids/in_use/in_use_note with in_use_since auto-set-on-true / cleared-on-false (round-trip verified), Flag image_ids supported on create+POST+PUT, Show link_timestamp persists via POST+PUT+GET. Frontend testids verified live via Playwright: global-search-open toggles global-search-input; global-search-close closes; mobile-nav-toggle reveals mobile-nav with 7 links (390px viewport); Costume form renders form-note-image-btn, form-note-image-input, form-in-use-switch (turning on reveals form-in-use-note), form-flag-add-select+form-flag-image-input-0 after adding a flag; loc-new-btn toggles form-new-location container with -name/-parent/-save children; Settings shows merge-cat-card + merge-keeper-select + merge-discard-select + merge-cat-btn + migrate-legacy-btn; Shows Add-Show dialog exposes show-form-timestamp input; Dashboard in-use-tile present in stats grid.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Any page (Layout categories list)", "issues": ["React console warning: 'Encountered two children with the same key, Accessories'. Root cause verified via GET /api/categories which returns 10 rows with two entries named 'Accessories' (two distinct ids). This is legacy data, and iteration-9 merge-cat-card is the intended remediation. Non-blocking but suggest (a) use category.id as the React key everywhere instead of name, (b) show the merge card prominently when duplicate names are detected."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Frontend: replace name-as-key with id-as-key in category .map() calls (silences React duplicate-key warning triggered by the two 'Accessories' rows in seed data).",
+    "Optional: on Settings load, if duplicate category names are detected, auto-scroll/highlight the merge-cat-card to guide the user."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 1533 lines — split into routers (costumes, flags, categories, shows, admin, uploads) is overdue.",
+    "Repeated pattern of adding new fields to both response and payload Pydantic models — link_timestamp / in_use / note_image_ids / image_ids all done correctly this iter (learning from iter-7/8 misses).",
+    "/api/categories/similar uses difflib.SequenceMatcher which is O(n) per category on every keystroke; fine at current scale but consider debounce on FE.",
+    "/api/admin/migrate-legacy-flags is idempotent-ish (only touches is_flagged=True with empty flags) but multiple runs create duplicate 'Legacy' category lookups; find_one guard exists — OK.",
+    "in_use_since is stored as ISO string; consider using datetime for MongoDB-native sort (works currently because ISO 8601 sorts lexicographically)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (added TestIteration9 class: 8 tests covering merge, similar, migrate-legacy, in-use endpoint+roundtrip, note_image_ids, flag image_ids CRUD, show link_timestamp, stats.in_use_count)"
+  ],
+  "success_rate": {"backend": "100% (35/35 pytest)", "frontend": "100% of iter9 testids verified interactively"},
+  "test_credentials": "none required (open app)",
+  "seed_data_creation": "All test data prefixed TEST_ and cleaned up in finally blocks. One test writes is_flagged=True directly via pymongo then deletes the costume.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 9 shipped: /api/categories/merge, /api/categories/similar, /api/admin/migrate-legacy-flags, /api/in-use, in_use/in_use_note/in_use_since/note_image_ids on Costume, image_ids on Flag entries, link_timestamp on Show, in_use_count in /api/stats. Frontend testids to know: global-search-open/close/form/input, mobile-nav-toggle+mobile-nav+mobile-nav-*, form-new-subcategory[-add], loc-new-btn→form-new-location[-name/-parent/-save], form-new-show-inline[-name/-year/-save], form-note-image-btn/-input/-grid/-remove-{idx}, form-flag-image-input-{idx}, form-in-use-switch/-note, in-use-tile, in-use-section, in-use-{id}, in-use-badge-{id}, detail-in-use-banner, detail-note-images, detail-flag-images-{flagId}, merge-cat-card, merge-keeper-select, merge-discard-select, merge-cat-btn, migrate-legacy-btn, migrate-legacy-result, edit-show-timestamp-{id}, show-form-timestamp, similar-cats-warning, similar-cat-{id}. Test DB has duplicate 'Accessories' category names causing a React key warning — expected to be resolved once the user merges them via the new merge feature."
+}

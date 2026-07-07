@@ -128,6 +128,7 @@ class CostumeBase(BaseModel):
     location: str
     sub_location: Optional[str] = ""
     notes: Optional[str] = ""
+    note_image_ids: List[str] = Field(default_factory=list)
     sizing_system: Optional[str] = "Letter"
     sizes: Dict[str, int] = Field(default_factory=dict)
     size_notes: Dict[str, str] = Field(default_factory=dict)
@@ -138,6 +139,8 @@ class CostumeBase(BaseModel):
     additional_show_ids: List[str] = Field(default_factory=list)
     group_id: Optional[str] = None
     variant_label: Optional[str] = ""
+    in_use: Optional[bool] = False
+    in_use_note: Optional[str] = ""
 
 
 class CostumeCreate(CostumeBase):
@@ -154,6 +157,7 @@ class CostumeUpdate(BaseModel):
     location: Optional[str] = None
     sub_location: Optional[str] = None
     notes: Optional[str] = None
+    note_image_ids: Optional[List[str]] = None
     sizing_system: Optional[str] = None
     sizes: Optional[Dict[str, int]] = None
     size_notes: Optional[Dict[str, str]] = None
@@ -168,6 +172,8 @@ class CostumeUpdate(BaseModel):
     flags: Optional[List[Dict]] = None
     group_id: Optional[str] = None
     variant_label: Optional[str] = None
+    in_use: Optional[bool] = None
+    in_use_note: Optional[str] = None
 
 
 class FlagPayload(BaseModel):
@@ -190,10 +196,12 @@ class FlagCategory(BaseModel):
 class AttachFlagPayload(BaseModel):
     category_id: str
     note: Optional[str] = ""
+    image_ids: Optional[List[str]] = None
 
 
 class UpdateFlagPayload(BaseModel):
     note: Optional[str] = ""
+    image_ids: Optional[List[str]] = None
 
 
 class Costume(BaseModel):
@@ -205,6 +213,7 @@ class Costume(BaseModel):
     location: str
     sub_location: str = ""
     notes: str = ""
+    note_image_ids: List[str] = Field(default_factory=list)
     sizing_system: str = "Letter"
     sizes: Dict[str, int]
     size_notes: Dict[str, str] = Field(default_factory=dict)
@@ -220,6 +229,9 @@ class Costume(BaseModel):
     flag_reason: str = ""
     flagged_at: Optional[str] = None
     flags: List[Dict] = Field(default_factory=list)
+    in_use: bool = False
+    in_use_note: str = ""
+    in_use_since: Optional[str] = None
     created_at: str
     updated_at: str
     group_id: Optional[str] = None
@@ -266,6 +278,7 @@ class Show(BaseModel):
     image_id: Optional[str] = None
     notes: Optional[str] = ""
     show_link: Optional[str] = ""
+    link_timestamp: Optional[str] = ""
     created_at: str
 
 
@@ -275,6 +288,7 @@ class ShowPayload(BaseModel):
     image_id: Optional[str] = None
     notes: Optional[str] = ""
     show_link: Optional[str] = ""
+    link_timestamp: Optional[str] = ""
 
 
 class SubcategoryPayload(BaseModel):
@@ -373,6 +387,7 @@ async def get_stats():
         "category_count": len(categories),
         "locations_in_use": locations_in_use,
         "flagged_count": sum(1 for c in costumes if c.get("is_flagged")),
+        "in_use_count": sum(1 for c in costumes if c.get("in_use")),
     }
 
 
@@ -479,6 +494,7 @@ async def create_costume(payload: CostumeCreate):
             "id": f.get("id") or str(uuid.uuid4()),
             "category_id": f["category_id"],
             "note": (f.get("note") or "").strip(),
+            "image_ids": [str(x) for x in (f.get("image_ids") or []) if x],
             "created_at": f.get("created_at") or now,
         })
     is_flagged = bool(payload.is_flagged) or len(flags) > 0
@@ -493,6 +509,7 @@ async def create_costume(payload: CostumeCreate):
         "location": payload.location.strip(),
         "sub_location": (payload.sub_location or "").strip(),
         "notes": (payload.notes or "").strip(),
+        "note_image_ids": [str(x) for x in (payload.note_image_ids or []) if x],
         "sizing_system": (payload.sizing_system or "Letter").strip(),
         "sizes": sizes,
         "size_notes": size_notes,
@@ -508,6 +525,9 @@ async def create_costume(payload: CostumeCreate):
         "flag_reason": flag_reason,
         "flagged_at": now if is_flagged else None,
         "flags": flags,
+        "in_use": bool(payload.in_use),
+        "in_use_note": (payload.in_use_note or "").strip() if payload.in_use else "",
+        "in_use_since": now if payload.in_use else None,
         "group_id": payload.group_id,
         "variant_label": (payload.variant_label or "").strip(),
         "created_at": now,
@@ -545,6 +565,7 @@ async def update_costume(costume_id: str, payload: CostumeUpdate):
                 "id": f.get("id") or str(uuid.uuid4()),
                 "category_id": f["category_id"],
                 "note": (f.get("note") or "").strip(),
+                "image_ids": [str(x) for x in (f.get("image_ids") or []) if x],
                 "created_at": f.get("created_at") or now_ts,
             })
         updates["flags"] = normalized
@@ -564,6 +585,16 @@ async def update_costume(costume_id: str, payload: CostumeUpdate):
             updates["flagged_at"] = None
             updates["flag_reason"] = ""
             updates["flags"] = []
+    if "in_use" in updates:
+        if updates["in_use"]:
+            if not existing.get("in_use"):
+                updates["in_use_since"] = _now_iso()
+        else:
+            updates["in_use_since"] = None
+            if "in_use_note" not in updates:
+                updates["in_use_note"] = ""
+    if "note_image_ids" in updates:
+        updates["note_image_ids"] = [str(x) for x in (updates["note_image_ids"] or []) if x]
     updates["updated_at"] = _now_iso()
     await db.costumes.update_one({"id": costume_id}, {"$set": updates})
     doc = await db.costumes.find_one({"id": costume_id}, {"_id": 0})
@@ -863,6 +894,51 @@ async def delete_subcategory(category_id: str, sub_id: str):
     return {"ok": True}
 
 
+class CategoryMergePayload(BaseModel):
+    keeper_id: str
+    discard_id: str
+
+
+@api_router.post("/categories/merge")
+async def merge_categories(payload: CategoryMergePayload):
+    if payload.keeper_id == payload.discard_id:
+        raise HTTPException(status_code=400, detail="Cannot merge a category into itself")
+    keeper = await db.categories.find_one({"id": payload.keeper_id})
+    discard = await db.categories.find_one({"id": payload.discard_id})
+    if not keeper or not discard:
+        raise HTTPException(status_code=404, detail="Category not found")
+    # Move all costumes from discard to keeper (clear subcategory since taxonomies differ)
+    moved = await db.costumes.update_many(
+        {"category": discard["name"]},
+        {"$set": {"category": keeper["name"], "subcategory": "", "updated_at": _now_iso()}}
+    )
+    # Delete the discard category
+    await db.categories.delete_one({"id": payload.discard_id})
+    return {
+        "ok": True,
+        "keeper": keeper["name"],
+        "discarded": discard["name"],
+        "moved": moved.modified_count,
+    }
+
+
+@api_router.get("/categories/similar")
+async def similar_categories(name: str, threshold: float = 0.6):
+    """Return existing categories whose name is similar to the given name (case-insensitive)."""
+    import difflib
+    target = name.strip().lower()
+    if not target:
+        return []
+    docs = await db.categories.find({}, {"_id": 0}).to_list(500)
+    results = []
+    for d in docs:
+        ratio = difflib.SequenceMatcher(None, target, d["name"].lower()).ratio()
+        if ratio >= threshold and d["name"].lower() != target:
+            results.append({"id": d["id"], "name": d["name"], "color": d.get("color", "#71717A"), "similarity": round(ratio, 2)})
+    results.sort(key=lambda x: -x["similarity"])
+    return results[:5]
+
+
 # --------- Sizing Systems Routes ---------
 @api_router.get("/sizing-systems", response_model=List[SizingSystem])
 async def list_sizing_systems():
@@ -1054,6 +1130,7 @@ async def create_show(payload: ShowPayload):
         "image_id": payload.image_id,
         "notes": (payload.notes or "").strip(),
         "show_link": (payload.show_link or "").strip(),
+        "link_timestamp": (payload.link_timestamp or "").strip(),
         "created_at": _now_iso(),
     }
     await db.shows.insert_one(doc)
@@ -1079,6 +1156,7 @@ async def update_show(show_id: str, payload: ShowPayload):
         "image_id": payload.image_id,
         "notes": (payload.notes or "").strip(),
         "show_link": (payload.show_link or "").strip(),
+        "link_timestamp": (payload.link_timestamp or "").strip(),
     }
     await db.shows.update_one({"id": show_id}, {"$set": updates})
     await db.costumes.update_many(
@@ -1149,6 +1227,46 @@ async def update_settings(payload: SettingsUpdate):
 async def list_flagged():
     docs = await db.costumes.find({"is_flagged": True}, {"_id": 0}).sort("flagged_at", -1).to_list(1000)
     return docs
+
+
+@api_router.get("/in-use", response_model=List[Costume])
+async def list_in_use():
+    docs = await db.costumes.find({"in_use": True}, {"_id": 0}).sort("in_use_since", -1).to_list(1000)
+    return docs
+
+
+@api_router.post("/admin/migrate-legacy-flags")
+async def migrate_legacy_flags():
+    """
+    Convert costumes that are is_flagged=True but have an empty flags array
+    into the flags-array format under an auto-created 'Legacy' flag category.
+    """
+    legacy_cat = await db.flag_categories.find_one({"name": "Legacy"})
+    if not legacy_cat:
+        legacy_cat = {
+            "id": str(uuid.uuid4()),
+            "name": "Legacy",
+            "color": "#71717A",
+            "created_at": _now_iso(),
+        }
+        await db.flag_categories.insert_one(dict(legacy_cat))
+    migrated = 0
+    cursor = db.costumes.find({"is_flagged": True, "$or": [{"flags": {"$exists": False}}, {"flags": {"$size": 0}}]}, {"_id": 0})
+    async for c in cursor:
+        now = _now_iso()
+        new_flag = {
+            "id": str(uuid.uuid4()),
+            "category_id": legacy_cat["id"],
+            "note": (c.get("flag_reason") or "").strip(),
+            "image_ids": [],
+            "created_at": c.get("flagged_at") or now,
+        }
+        await db.costumes.update_one(
+            {"id": c["id"]},
+            {"$set": {"flags": [new_flag], "updated_at": now}},
+        )
+        migrated += 1
+    return {"ok": True, "migrated": migrated, "legacy_category_id": legacy_cat["id"]}
 
 
 # --------- Flag Category Routes ---------
@@ -1236,6 +1354,7 @@ async def attach_flag(costume_id: str, payload: AttachFlagPayload):
         "id": str(uuid.uuid4()),
         "category_id": payload.category_id,
         "note": (payload.note or "").strip(),
+        "image_ids": [str(x) for x in (payload.image_ids or []) if x],
         "created_at": now,
     }
     flags = list(costume.get("flags") or [])
@@ -1265,6 +1384,8 @@ async def update_costume_flag(costume_id: str, flag_id: str, payload: UpdateFlag
     for f in flags:
         if f.get("id") == flag_id:
             f["note"] = (payload.note or "").strip()
+            if payload.image_ids is not None:
+                f["image_ids"] = [str(x) for x in payload.image_ids if x]
             found = True
             break
     if not found:

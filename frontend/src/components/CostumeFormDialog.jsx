@@ -11,7 +11,8 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Upload, Image as ImageIcon, X, StickyNote, Flag, Plus, LinkIcon } from "lucide-react";
+import { Upload, Image as ImageIcon, X, StickyNote, Flag, Plus, LinkIcon, Sparkles } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 
 export default function CostumeFormDialog({
   open, onOpenChange, editing, categories, locations, sizingSystems, shows, groups, onSaved,
@@ -30,7 +31,9 @@ export default function CostumeFormDialog({
   const [sizeNotes, setSizeNotes] = useState({});
   const [openSizeNote, setOpenSizeNote] = useState(null);
   const [imageId, setImageId] = useState(null);
+  const [noteImageIds, setNoteImageIds] = useState([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadingNote, setUploadingNote] = useState(false);
   const [saving, setSaving] = useState(false);
   const [isFlagged, setIsFlagged] = useState(false);
   const [flagReason, setFlagReason] = useState("");
@@ -44,7 +47,18 @@ export default function CostumeFormDialog({
   const [kwInput, setKwInput] = useState("");
   const [groupId, setGroupId] = useState("");
   const [variantLabel, setVariantLabel] = useState("");
+  const [inUse, setInUse] = useState(false);
+  const [inUseNote, setInUseNote] = useState("");
+  const [newSubcatName, setNewSubcatName] = useState("");
+  const [newLocMode, setNewLocMode] = useState(false);
+  const [newLocName, setNewLocName] = useState("");
+  const [newLocParentId, setNewLocParentId] = useState("");
+  const [addingShow, setAddingShow] = useState(false);
+  const [newShowName, setNewShowName] = useState("");
+  const [newShowYear, setNewShowYear] = useState("");
+  const [similarCats, setSimilarCats] = useState([]);
   const fileRef = useRef(null);
+  const noteFileRef = useRef(null);
 
   const currentSystem = useMemo(
     () => (sizingSystems || []).find((s) => s.name === systemName),
@@ -120,12 +134,13 @@ export default function CostumeFormDialog({
       }
       setSubLocation(editing.sub_location || "");
       setNotes(editing.notes || "");
+      setNoteImageIds(editing.note_image_ids || []);
       setSizes(editing.sizes || {});
       setSizeNotes(editing.size_notes || {});
       setImageId(editing.image_id || null);
       setIsFlagged(!!editing.is_flagged);
       setFlagReason(editing.flag_reason || "");
-      setFlags(editing.flags ? editing.flags.map((f) => ({ id: f.id, category_id: f.category_id, note: f.note || "" })) : []);
+      setFlags(editing.flags ? editing.flags.map((f) => ({ id: f.id, category_id: f.category_id, note: f.note || "", image_ids: f.image_ids || [] })) : []);
       setCreator(editing.creator || "");
       setBuyLink(editing.buy_link || "");
       setOriginalShowId(editing.original_show_id || "");
@@ -133,11 +148,14 @@ export default function CostumeFormDialog({
       setKeywords(editing.keywords || []);
       setGroupId(editing.group_id || "");
       setVariantLabel(editing.variant_label || "");
+      setInUse(!!editing.in_use);
+      setInUseNote(editing.in_use_note || "");
     } else {
       setName(""); setCategory(""); setNewCategory("");
       setSystemName("Letter");
       setLocMode("preset"); setLocPath([]); setSubLocation(""); setCustomLocation("");
       setNotes("");
+      setNoteImageIds([]);
       setSizes({});
       setSizeNotes({});
       setImageId(null);
@@ -151,7 +169,17 @@ export default function CostumeFormDialog({
       setKeywords([]);
       setGroupId("");
       setVariantLabel("");
+      setInUse(false);
+      setInUseNote("");
     }
+    setNewSubcatName("");
+    setNewLocMode(false);
+    setNewLocName("");
+    setNewLocParentId("");
+    setAddingShow(false);
+    setNewShowName("");
+    setNewShowYear("");
+    setSimilarCats([]);
     setOpenSizeNote(null);
     setKwInput("");
   }, [open, editing, locations, locById]);
@@ -257,6 +285,119 @@ export default function CostumeFormDialog({
     if (fileRef.current) fileRef.current.value = "";
   };
 
+  const handleNoteImageUpload = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    setUploadingNote(true);
+    try {
+      for (const file of files) {
+        if (!file.type.startsWith("image/")) continue;
+        const fd = new FormData();
+        fd.append("file", file);
+        const r = await api.post("/upload", fd, { headers: { "Content-Type": "multipart/form-data" } });
+        setNoteImageIds((prev) => [...prev, r.data.image_id]);
+      }
+      toast.success(`Uploaded ${files.length} image${files.length === 1 ? "" : "s"}`);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Upload failed");
+    }
+    setUploadingNote(false);
+    if (noteFileRef.current) noteFileRef.current.value = "";
+  };
+
+  const uploadFlagImage = async (flagIdx, files) => {
+    try {
+      for (const file of files) {
+        if (!file.type.startsWith("image/")) continue;
+        const fd = new FormData();
+        fd.append("file", file);
+        const r = await api.post("/upload", fd, { headers: { "Content-Type": "multipart/form-data" } });
+        setFlags((prev) => prev.map((f, i) => i === flagIdx
+          ? { ...f, image_ids: [...(f.image_ids || []), r.data.image_id] }
+          : f));
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Upload failed");
+    }
+  };
+
+  // Similar-category suggestion when adding a new one
+  useEffect(() => {
+    if (category !== "__new__" || !newCategory.trim() || newCategory.trim().length < 2) {
+      setSimilarCats([]);
+      return;
+    }
+    const t = setTimeout(async () => {
+      try {
+        const r = await api.get("/categories/similar", { params: { name: newCategory.trim() } });
+        setSimilarCats(r.data || []);
+      } catch { setSimilarCats([]); }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [category, newCategory]);
+
+  const createSubcategoryInline = async () => {
+    const nm = newSubcatName.trim();
+    if (!nm || !currentCategory) return;
+    // Determine parent from last selected level (if any)
+    const parentId = subcategoryPath.length ? subcategoryPath[subcategoryPath.length - 1] : null;
+    try {
+      const r = await api.post(`/categories/${currentCategory.id}/subcategories`, { name: nm, parent_id: parentId });
+      toast.success("Subcategory created");
+      setNewSubcatName("");
+      // Append the new id to the path
+      setSubcategoryPath((prev) => [...prev, r.data.id]);
+      onSaved?.({ refresh_only: true });
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to add");
+    }
+  };
+
+  const createLocationInline = async () => {
+    const nm = newLocName.trim();
+    if (!nm) return;
+    try {
+      const r = await api.post("/locations", { name: nm, parent_id: newLocParentId || null });
+      toast.success("Location created");
+      // Set as the current location (chain based on parent path + new id)
+      const chain = [];
+      let cur = r.data;
+      const map = { ...locById, [r.data.id]: r.data };
+      while (cur) {
+        chain.unshift(cur.id);
+        cur = cur.parent_id ? map[cur.parent_id] : null;
+      }
+      setLocPath(chain);
+      setNewLocMode(false);
+      setNewLocName("");
+      setNewLocParentId("");
+      onSaved?.({ refresh_only: true });
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to create location");
+    }
+  };
+
+  const createShowInline = async () => {
+    const nm = newShowName.trim();
+    if (!nm) return;
+    const yr = newShowYear.trim() ? parseInt(newShowYear, 10) : null;
+    if (newShowYear.trim() && (isNaN(yr) || yr < 1800 || yr > 2200)) {
+      toast.error("Year must be between 1800 and 2200");
+      return;
+    }
+    try {
+      const r = await api.post("/shows", { name: nm, year: yr });
+      toast.success("Show created");
+      setOriginalShowId(r.data.id);
+      setAddingShow(false);
+      setNewShowName("");
+      setNewShowYear("");
+      onSaved?.({ refresh_only: true });
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to create show");
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     const finalCategory = (category === "__new__" ? newCategory : category).trim();
@@ -272,7 +413,12 @@ export default function CostumeFormDialog({
       }
       const cleanedFlags = flags
         .filter((f) => f.category_id)
-        .map((f) => ({ id: f.id, category_id: f.category_id, note: (f.note || "").trim() }));
+        .map((f) => ({
+          id: f.id,
+          category_id: f.category_id,
+          note: (f.note || "").trim(),
+          image_ids: [...(f.image_ids || [])],
+        }));
       const payload = {
         name: name.trim(),
         category: finalCategory,
@@ -280,6 +426,7 @@ export default function CostumeFormDialog({
         location: finalLocation,
         sub_location: locMode === "preset" ? subLocation.trim() : "",
         notes: notes.trim(),
+        note_image_ids: [...noteImageIds],
         sizing_system: systemName,
         sizes: Object.fromEntries(sizeKeys.map((s) => [s, Number(sizes[s]) || 0])),
         size_notes: Object.fromEntries(sizeKeys.map((s) => [s, (sizeNotes[s] || "").trim()])),
@@ -294,6 +441,8 @@ export default function CostumeFormDialog({
         flags: cleanedFlags,
         group_id: groupId || null,
         variant_label: variantLabel.trim(),
+        in_use: inUse,
+        in_use_note: inUse ? inUseNote.trim() : "",
       };
       if (editing) {
         await api.put(`/costumes/${editing.id}`, payload);
@@ -342,36 +491,85 @@ export default function CostumeFormDialog({
                 </SelectContent>
               </Select>
               {category === "__new__" && (
-                <Input data-testid="form-new-category" value={newCategory} onChange={(e) => setNewCategory(e.target.value)} placeholder="New category name" className="rounded-none border-[#E4E4E7] h-10 mt-2" />
+                <div className="space-y-2 mt-2">
+                  <Input data-testid="form-new-category" value={newCategory} onChange={(e) => setNewCategory(e.target.value)} placeholder="New category name" className="rounded-none border-[#E4E4E7] h-10" />
+                  {similarCats.length > 0 && (
+                    <div className="border border-[#F59E0B] bg-[#FFFBEB] p-3" data-testid="similar-cats-warning">
+                      <div className="eyebrow text-[#78350F] mb-1.5">SIMILAR CATEGORIES ALREADY EXIST</div>
+                      <div className="flex flex-wrap gap-2">
+                        {similarCats.map((sc) => (
+                          <button
+                            key={sc.id}
+                            type="button"
+                            data-testid={`similar-cat-${sc.id}`}
+                            onClick={() => { setCategory(sc.name); setNewCategory(""); setSimilarCats([]); }}
+                            className="inline-flex items-center gap-1.5 border border-[#78350F] px-2.5 py-1 text-xs bg-white hover:bg-[#FEF3C7]"
+                          >
+                            <span className="w-2 h-2" style={{ backgroundColor: sc.color }} />
+                            Use &ldquo;{sc.name}&rdquo;
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-[#78350F] mt-2 font-mono-label">CLICK TO REUSE — AVOIDS DUPLICATE CATEGORIES</p>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </div>
 
-          {category && category !== "__new__" && subcatNodes.length > 0 && (
+          {category && category !== "__new__" && currentCategory && (
             <div className="space-y-2">
               <Label className="eyebrow">SUBCATEGORY</Label>
-              <div className="grid md:grid-cols-3 gap-2">
-                {subcatLevels.map((lvl, i) => (
-                  <Select
-                    key={i}
-                    value={lvl.selected || "__none__"}
-                    onValueChange={(v) => selectSubcatLevel(i, v === "__none__" ? "" : v)}
-                  >
-                    <SelectTrigger data-testid={`form-subcategory-level-${i}`} className="rounded-none border-[#E4E4E7] h-11">
-                      <SelectValue placeholder={i === 0 ? "Choose subcategory" : "Nested (optional)"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">— {i === 0 ? "none" : "stop here"} —</SelectItem>
-                      {lvl.options.map((s) => (
-                        <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ))}
-              </div>
-              {chosenSubcategoryPath && (
-                <p className="text-xs text-[#71717A]">Selected: <span className="font-medium text-[#09090B]">{chosenSubcategoryPath}</span></p>
+              {subcatNodes.length > 0 && (
+                <>
+                  <div className="grid md:grid-cols-3 gap-2">
+                    {subcatLevels.map((lvl, i) => (
+                      <Select
+                        key={i}
+                        value={lvl.selected || "__none__"}
+                        onValueChange={(v) => selectSubcatLevel(i, v === "__none__" ? "" : v)}
+                      >
+                        <SelectTrigger data-testid={`form-subcategory-level-${i}`} className="rounded-none border-[#E4E4E7] h-11">
+                          <SelectValue placeholder={i === 0 ? "Choose subcategory" : "Nested (optional)"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">— {i === 0 ? "none" : "stop here"} —</SelectItem>
+                          {lvl.options.map((s) => (
+                            <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ))}
+                  </div>
+                  {chosenSubcategoryPath && (
+                    <p className="text-xs text-[#71717A]">Selected: <span className="font-medium text-[#09090B]">{chosenSubcategoryPath}</span></p>
+                  )}
+                </>
               )}
+              <div className="flex gap-2">
+                <Input
+                  data-testid="form-new-subcategory"
+                  value={newSubcatName}
+                  onChange={(e) => setNewSubcatName(e.target.value)}
+                  placeholder={
+                    subcategoryPath.length > 0
+                      ? `+ Add nested subcategory under "${subcatById[subcategoryPath[subcategoryPath.length - 1]]?.name || ""}"…`
+                      : "+ Add a new subcategory to this category…"
+                  }
+                  className="rounded-none border-[#E4E4E7] h-10"
+                />
+                <Button
+                  type="button"
+                  data-testid="form-new-subcategory-add"
+                  onClick={createSubcategoryInline}
+                  disabled={!newSubcatName.trim()}
+                  variant="outline"
+                  className="rounded-none border-[#09090B] h-10"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </Button>
+              </div>
             </div>
           )}
 
@@ -382,21 +580,71 @@ export default function CostumeFormDialog({
               <button
                 type="button"
                 data-testid="loc-preset-btn"
-                onClick={() => setLocMode("preset")}
-                className={`text-xs px-3 py-1.5 border ${locMode === "preset" ? "bg-[#09090B] text-white border-[#09090B]" : "bg-white text-[#09090B] border-[#E4E4E7]"}`}
+                onClick={() => { setLocMode("preset"); setNewLocMode(false); }}
+                className={`text-xs px-3 py-1.5 border ${locMode === "preset" && !newLocMode ? "bg-[#09090B] text-white border-[#09090B]" : "bg-white text-[#09090B] border-[#E4E4E7]"}`}
               >
                 Preset (nested)
               </button>
               <button
                 type="button"
                 data-testid="loc-custom-btn"
-                onClick={() => setLocMode("custom")}
-                className={`text-xs px-3 py-1.5 border ${locMode === "custom" ? "bg-[#09090B] text-white border-[#09090B]" : "bg-white text-[#09090B] border-[#E4E4E7]"}`}
+                onClick={() => { setLocMode("custom"); setNewLocMode(false); }}
+                className={`text-xs px-3 py-1.5 border ${locMode === "custom" && !newLocMode ? "bg-[#09090B] text-white border-[#09090B]" : "bg-white text-[#09090B] border-[#E4E4E7]"}`}
               >
-                Custom
+                Free text
+              </button>
+              <button
+                type="button"
+                data-testid="loc-new-btn"
+                onClick={() => setNewLocMode((v) => !v)}
+                className={`text-xs px-3 py-1.5 border ${newLocMode ? "bg-[#09090B] text-white border-[#09090B]" : "bg-white text-[#09090B] border-[#E4E4E7]"}`}
+              >
+                + New storage location
               </button>
             </div>
-            {locMode === "preset" ? (
+            {newLocMode ? (
+              <div className="border border-[#E4E4E7] p-3 space-y-2 bg-[#FAFAFA]" data-testid="form-new-location">
+                <div className="grid md:grid-cols-2 gap-2">
+                  <Input
+                    data-testid="form-new-location-name"
+                    value={newLocName}
+                    onChange={(e) => setNewLocName(e.target.value)}
+                    placeholder="New location name (e.g. Backstage Rack C)"
+                    className="rounded-none border-[#E4E4E7] h-10 bg-white"
+                  />
+                  <Select value={newLocParentId || "__none__"} onValueChange={(v) => setNewLocParentId(v === "__none__" ? "" : v)}>
+                    <SelectTrigger data-testid="form-new-location-parent" className="rounded-none border-[#E4E4E7] h-10 bg-white">
+                      <SelectValue placeholder="Nest under (optional)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">— Top level —</SelectItem>
+                      {locations.map((l) => (
+                        <SelectItem key={l.id} value={l.id}>{"— ".repeat(l.depth || 0)}{l.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    data-testid="form-new-location-save"
+                    onClick={createLocationInline}
+                    disabled={!newLocName.trim()}
+                    className="bg-[#09090B] hover:bg-[#27272A] rounded-none h-9 text-white"
+                  >
+                    <Plus className="h-3.5 w-3.5 mr-1" /> Create &amp; use
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => { setNewLocMode(false); setNewLocName(""); setNewLocParentId(""); }}
+                    className="rounded-none h-9"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : locMode === "preset" ? (
               <div className="space-y-2">
                 <div className="grid md:grid-cols-3 gap-2">
                   {levels.map((lvl, i) => (
@@ -541,17 +789,67 @@ export default function CostumeFormDialog({
             </div>
             <div className="space-y-2">
               <Label className="eyebrow">ORIGINAL SHOW</Label>
-              <Select value={originalShowId || "__none__"} onValueChange={(v) => setOriginalShowId(v === "__none__" ? "" : v)}>
-                <SelectTrigger data-testid="form-original-show" className="rounded-none border-[#E4E4E7] h-11">
-                  <SelectValue placeholder="Select a show" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">— None —</SelectItem>
-                  {(shows || []).map((s) => (
-                    <SelectItem key={s.id} value={s.id}>{s.name}{s.year ? ` (${s.year})` : ""}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {addingShow ? (
+                <div className="border border-[#E4E4E7] p-3 space-y-2 bg-[#FAFAFA]" data-testid="form-new-show-inline">
+                  <div className="grid md:grid-cols-2 gap-2">
+                    <Input
+                      data-testid="form-new-show-name"
+                      value={newShowName}
+                      onChange={(e) => setNewShowName(e.target.value)}
+                      placeholder="Show name"
+                      className="rounded-none border-[#E4E4E7] h-10 bg-white"
+                    />
+                    <Input
+                      type="number"
+                      min="1800"
+                      max="2200"
+                      data-testid="form-new-show-year"
+                      value={newShowYear}
+                      onChange={(e) => setNewShowYear(e.target.value)}
+                      placeholder="Year (optional)"
+                      className="rounded-none border-[#E4E4E7] h-10 bg-white"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      data-testid="form-new-show-save"
+                      onClick={createShowInline}
+                      disabled={!newShowName.trim()}
+                      className="bg-[#09090B] hover:bg-[#27272A] rounded-none h-9 text-white"
+                    >
+                      <Plus className="h-3.5 w-3.5 mr-1" /> Create &amp; use
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => { setAddingShow(false); setNewShowName(""); setNewShowYear(""); }}
+                      className="rounded-none h-9"
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <Select
+                  value={originalShowId || "__none__"}
+                  onValueChange={(v) => {
+                    if (v === "__add_new__") { setAddingShow(true); return; }
+                    setOriginalShowId(v === "__none__" ? "" : v);
+                  }}
+                >
+                  <SelectTrigger data-testid="form-original-show" className="rounded-none border-[#E4E4E7] h-11">
+                    <SelectValue placeholder="Select a show" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">— None —</SelectItem>
+                    {(shows || []).map((s) => (
+                      <SelectItem key={s.id} value={s.id}>{s.name}{s.year ? ` (${s.year})` : ""}</SelectItem>
+                    ))}
+                    <SelectItem value="__add_new__">+ Add new show…</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
             </div>
           </div>
 
@@ -686,6 +984,48 @@ export default function CostumeFormDialog({
                         placeholder="Note for this flag (e.g. Loaned to Company X until 15 April)"
                         className="rounded-none border-[#E4E4E7] text-sm"
                       />
+                      <div className="flex items-center gap-2 mt-2">
+                        <label htmlFor={`form-flag-image-input-${idx}`}>
+                          <input
+                            id={`form-flag-image-input-${idx}`}
+                            data-testid={`form-flag-image-input-${idx}`}
+                            type="file"
+                            accept="image/*"
+                            multiple
+                            onChange={(e) => { const files = Array.from(e.target.files || []); e.target.value = ""; uploadFlagImage(idx, files); }}
+                            className="hidden"
+                          />
+                          <span className="inline-flex items-center gap-1 border border-[#09090B] text-[#09090B] hover:bg-[#F4F4F5] px-2.5 py-1 text-xs cursor-pointer">
+                            <Upload className="h-3 w-3" /> Attach image
+                          </span>
+                        </label>
+                        {(f.image_ids || []).length > 0 && (
+                          <span className="text-[10px] text-[#71717A] tabular-nums">{f.image_ids.length} attached</span>
+                        )}
+                      </div>
+                      {(f.image_ids || []).length > 0 && (
+                        <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 mt-2" data-testid={`form-flag-image-grid-${idx}`}>
+                          {(f.image_ids || []).map((iid, i2) => (
+                            <div key={i2} className="relative group aspect-square border border-[#E4E4E7]">
+                              <img
+                                src={`${process.env.REACT_APP_BACKEND_URL}/api/images/${iid}`}
+                                alt=""
+                                className="w-full h-full object-cover"
+                              />
+                              <button
+                                type="button"
+                                data-testid={`form-flag-image-remove-${idx}-${i2}`}
+                                onClick={() => setFlags((prev) => prev.map((x, i) => i === idx
+                                  ? { ...x, image_ids: (x.image_ids || []).filter((_, k) => k !== i2) }
+                                  : x))}
+                                className="absolute top-1 right-1 bg-white/95 border border-[#E4E4E7] p-1 opacity-0 group-hover:opacity-100 hover:border-[#EF4444] hover:text-[#EF4444]"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -723,6 +1063,82 @@ export default function CostumeFormDialog({
           <div className="space-y-2">
             <Label className="eyebrow">GENERAL NOTES</Label>
             <Textarea data-testid="form-notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Condition, accessories, special instructions…" rows={3} className="rounded-none border-[#E4E4E7]" />
+            <div className="flex items-center gap-2">
+              <input
+                ref={noteFileRef}
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handleNoteImageUpload}
+                className="hidden"
+                data-testid="form-note-image-input"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                data-testid="form-note-image-btn"
+                onClick={() => noteFileRef.current?.click()}
+                disabled={uploadingNote}
+                className="rounded-none h-9 border-[#09090B]"
+              >
+                <Upload className="h-3.5 w-3.5 mr-1.5" />
+                {uploadingNote ? "Uploading…" : "Attach image to notes"}
+              </Button>
+              {noteImageIds.length > 0 && (
+                <span className="text-xs text-[#71717A] tabular-nums">{noteImageIds.length} attached</span>
+              )}
+            </div>
+            {noteImageIds.length > 0 && (
+              <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 mt-2" data-testid="form-note-image-grid">
+                {noteImageIds.map((iid, idx) => (
+                  <div key={idx} className="relative group aspect-square border border-[#E4E4E7]" data-testid={`form-note-image-${idx}`}>
+                    <img
+                      src={`${process.env.REACT_APP_BACKEND_URL}/api/images/${iid}`}
+                      alt=""
+                      className="w-full h-full object-cover"
+                    />
+                    <button
+                      type="button"
+                      data-testid={`form-note-image-remove-${idx}`}
+                      onClick={() => setNoteImageIds((prev) => prev.filter((_, i) => i !== idx))}
+                      className="absolute top-1 right-1 bg-white/95 border border-[#E4E4E7] p-1 opacity-0 group-hover:opacity-100 hover:border-[#EF4444] hover:text-[#EF4444]"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Currently in use */}
+          <div className="border border-[#E4E4E7] p-4 space-y-3" data-testid="form-in-use-section">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-2">
+                <Sparkles className={`h-4 w-4 ${inUse ? "text-[#10B981]" : "text-[#71717A]"}`} />
+                <Label className="eyebrow">CURRENTLY IN USE</Label>
+              </div>
+              <Switch
+                data-testid="form-in-use-switch"
+                checked={inUse}
+                onCheckedChange={setInUse}
+              />
+            </div>
+            {inUse && (
+              <div className="space-y-2">
+                <Textarea
+                  data-testid="form-in-use-note"
+                  value={inUseNote}
+                  onChange={(e) => setInUseNote(e.target.value)}
+                  rows={2}
+                  placeholder="Optional context (e.g. On stage for run of Hairspray, Feb 5–20)"
+                  className="rounded-none border-[#E4E4E7]"
+                />
+                <p className="text-[10px] text-[#A1A1AA] font-mono-label">
+                  ITEMS &ldquo;IN USE&rdquo; ARE HIGHLIGHTED ON THE DASHBOARD.
+                </p>
+              </div>
+            )}
           </div>
 
           <DialogFooter className="gap-2">

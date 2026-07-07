@@ -36,6 +36,7 @@ export default function Settings() {
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const logoInputRef = useRef(null);
   const [editShowLink, setEditShowLink] = useState("");
+  const [editShowTimestamp, setEditShowTimestamp] = useState("");
 
   const fetchAll = async () => {
     const [c, s, sys, sh, locs] = await Promise.all([
@@ -144,6 +145,7 @@ export default function Settings() {
     setEditShowYear(s.year != null ? String(s.year) : "");
     setEditShowImageId(s.image_id || null);
     setEditShowLink(s.show_link || "");
+    setEditShowTimestamp(s.link_timestamp || "");
   };
   const saveEditShow = async () => {
     const name = editShowName.trim();
@@ -151,7 +153,11 @@ export default function Settings() {
     if (!name) { toast.error("Name required"); return; }
     if (editShowYear.trim() && (isNaN(year) || year < 1800 || year > 2200)) { toast.error("Year invalid"); return; }
     try {
-      await api.put(`/shows/${editingShow}`, { name, year, image_id: editShowImageId, show_link: editShowLink.trim() });
+      await api.put(`/shows/${editingShow}`, {
+        name, year, image_id: editShowImageId,
+        show_link: editShowLink.trim(),
+        link_timestamp: editShowTimestamp.trim(),
+      });
       setEditingShow(null);
       toast.success("Show updated");
       fetchAll();
@@ -465,6 +471,28 @@ export default function Settings() {
               );
             })}
           </div>
+          <CategoryMergeCard categories={categories} onMerged={fetchAll} />
+        </div>
+      </section>
+
+      {/* Data maintenance */}
+      <section className="grid md:grid-cols-12 gap-8" data-testid="settings-maintenance">
+        <div className="md:col-span-4">
+          <div className="eyebrow">MAINTENANCE</div>
+          <h2 className="font-display text-xl font-semibold text-[#09090B] mt-2">Data upkeep</h2>
+          <p className="text-sm text-[#71717A] mt-2">
+            One-off actions to keep older data consistent with new features.
+          </p>
+        </div>
+        <div className="md:col-span-8 border border-[#E4E4E7] p-5 space-y-3">
+          <div>
+            <div className="font-display font-semibold text-[#09090B]">Migrate legacy flags</div>
+            <p className="text-sm text-[#71717A] mt-1">
+              Convert any older single-flag costumes into the new multi-flag system so they show up
+              under a &ldquo;Legacy&rdquo; category on the Flags tab.
+            </p>
+          </div>
+          <MigrateLegacyButton />
         </div>
       </section>
 
@@ -526,6 +554,13 @@ export default function Settings() {
                             className="pl-10 h-10 rounded-none border-[#E4E4E7]"
                           />
                         </div>
+                        <Input
+                          data-testid={`edit-show-timestamp-${s.id}`}
+                          value={editShowTimestamp}
+                          onChange={(e) => setEditShowTimestamp(e.target.value)}
+                          placeholder="Timestamp (e.g. 1:23 or 1:23:45)"
+                          className="h-10 rounded-none border-[#E4E4E7]"
+                        />
                         <div className="flex items-start gap-3">
                           <div className="w-24 h-24 image-empty border border-[#E4E4E7] overflow-hidden shrink-0 flex items-center justify-center">
                             {editShowImageId ? (
@@ -670,5 +705,123 @@ function SubcategoryTree({ catId, nodes, onAdd, onRename, onDelete }) {
       onRename={onRename}
       onDelete={onDelete}
     />
+  );
+}
+
+
+function CategoryMergeCard({ categories, onMerged }) {
+  const [keeperId, setKeeperId] = useState("");
+  const [discardId, setDiscardId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const keeper = categories.find((c) => c.id === keeperId);
+  const discard = categories.find((c) => c.id === discardId);
+  const disabled = !keeper || !discard || keeper.id === discard.id;
+  const submit = async () => {
+    if (disabled) return;
+    if (!window.confirm(
+      `Merge "${discard.name}" INTO "${keeper.name}"?\n\nAll costumes currently under "${discard.name}" will be reassigned to "${keeper.name}" (subcategories will be cleared for those items).\nThe "${discard.name}" category will be deleted.`
+    )) return;
+    setBusy(true);
+    try {
+      const r = await api.post("/categories/merge", { keeper_id: keeper.id, discard_id: discard.id });
+      toast.success(`Merged ${r.data.moved} costume(s) into ${r.data.keeper}`);
+      setKeeperId("");
+      setDiscardId("");
+      onMerged?.();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Merge failed");
+    }
+    setBusy(false);
+  };
+  return (
+    <div className="border border-[#E4E4E7] p-4 mt-2 space-y-3" data-testid="merge-cat-card">
+      <div>
+        <div className="font-display font-semibold text-[#09090B]">Merge categories</div>
+        <p className="text-xs text-[#71717A] mt-1">
+          Combine two categories into one. Choose the category to <span className="font-semibold text-[#09090B]">keep</span> — the other will be deleted and its costumes moved over.
+        </p>
+      </div>
+      <div className="grid md:grid-cols-2 gap-3">
+        <div>
+          <Label className="eyebrow">KEEP THIS CATEGORY</Label>
+          <Select value={keeperId || "__none__"} onValueChange={(v) => setKeeperId(v === "__none__" ? "" : v)}>
+            <SelectTrigger data-testid="merge-keeper-select" className="rounded-none h-10 border-[#E4E4E7] mt-2">
+              <SelectValue placeholder="Select the winning category" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">— Select —</SelectItem>
+              {categories.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  <span className="inline-flex items-center gap-2">
+                    <span className="w-2.5 h-2.5" style={{ backgroundColor: c.color || "#71717A" }} />
+                    {c.name}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label className="eyebrow">MERGE FROM (will be deleted)</Label>
+          <Select value={discardId || "__none__"} onValueChange={(v) => setDiscardId(v === "__none__" ? "" : v)}>
+            <SelectTrigger data-testid="merge-discard-select" className="rounded-none h-10 border-[#E4E4E7] mt-2">
+              <SelectValue placeholder="Select the category to absorb" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">— Select —</SelectItem>
+              {categories.filter((c) => c.id !== keeperId).map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  <span className="inline-flex items-center gap-2">
+                    <span className="w-2.5 h-2.5" style={{ backgroundColor: c.color || "#71717A" }} />
+                    {c.name}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <Button
+        onClick={submit}
+        disabled={disabled || busy}
+        data-testid="merge-cat-btn"
+        className="bg-[#09090B] hover:bg-[#27272A] rounded-none h-10 text-white w-full md:w-auto"
+      >
+        {busy ? "Merging…" : "Merge categories"}
+      </Button>
+    </div>
+  );
+}
+
+function MigrateLegacyButton() {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const submit = async () => {
+    setBusy(true);
+    try {
+      const r = await api.post("/admin/migrate-legacy-flags");
+      setResult(r.data);
+      toast.success(`Migrated ${r.data.migrated} costume(s)`);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Migration failed");
+    }
+    setBusy(false);
+  };
+  return (
+    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+      <Button
+        onClick={submit}
+        disabled={busy}
+        data-testid="migrate-legacy-btn"
+        className="bg-[#09090B] hover:bg-[#27272A] rounded-none h-10 text-white"
+      >
+        {busy ? "Migrating…" : "Migrate now"}
+      </Button>
+      {result && (
+        <span className="text-xs text-[#52525B] font-mono-label" data-testid="migrate-legacy-result">
+          MIGRATED {result.migrated} COSTUME(S)
+        </span>
+      )}
+    </div>
   );
 }

@@ -1,7 +1,7 @@
 import { Outlet, NavLink, Link, useLocation, useNavigate } from "react-router-dom";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { api } from "@/lib/api";
-import { LayoutDashboard, Package, MapPin, Settings as SettingsIcon, Search, X, Film, Flag } from "lucide-react";
+import { LayoutDashboard, Package, MapPin, Settings as SettingsIcon, Search, X, Film, Flag, Menu } from "lucide-react";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, testId: "nav-dashboard" },
@@ -17,6 +17,9 @@ export default function Layout() {
   const navigate = useNavigate();
   const [globalQ, setGlobalQ] = useState("");
   const [settings, setSettings] = useState({ org_name: "LUXE", logo_image_id: null });
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const searchInputRef = useRef(null);
 
   useEffect(() => {
     (async () => {
@@ -25,7 +28,6 @@ export default function Layout() {
         setSettings(r.data);
       } catch { /* ignore */ }
     })();
-    // Refresh settings whenever the tab regains focus (in case org name/logo was updated)
     const onFocus = async () => {
       try { const r = await api.get("/settings"); setSettings(r.data); } catch { /* ignore */ }
     };
@@ -36,9 +38,16 @@ export default function Layout() {
   useEffect(() => {
     if (location.pathname === "/inventory") {
       const sp = new URLSearchParams(location.search);
-      setGlobalQ(sp.get("q") || "");
+      const q = sp.get("q") || "";
+      setGlobalQ(q);
+      if (q) setSearchOpen(true);
     }
+    setMobileNavOpen(false);
   }, [location.pathname, location.search]);
+
+  useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus();
+  }, [searchOpen]);
 
   const submitSearch = (e) => {
     e.preventDefault();
@@ -46,8 +55,9 @@ export default function Layout() {
     navigate(q ? `/inventory?q=${encodeURIComponent(q)}` : "/inventory");
   };
 
-  const clearSearch = () => {
+  const clearAndCloseSearch = () => {
     setGlobalQ("");
+    setSearchOpen(false);
     if (location.pathname === "/inventory") navigate("/inventory");
   };
 
@@ -59,21 +69,13 @@ export default function Layout() {
   return (
     <div className="min-h-screen bg-white">
       <header className="sticky-header">
-        <div className="max-w-[1400px] mx-auto px-6 md:px-10">
-          <div className="flex items-center justify-between h-16 gap-4">
+        <div className="max-w-[1400px] mx-auto px-4 sm:px-6 md:px-10">
+          <div className="flex items-center justify-between h-16 gap-3">
             <Link to="/" data-testid="brand-link" className="flex items-center gap-3 group shrink-0">
               {logoUrl ? (
-                <img
-                  src={logoUrl}
-                  alt={orgName}
-                  className="h-11 w-11 object-cover rounded-full ring-1 ring-[#E4E4E7]"
-                  data-testid="brand-logo"
-                />
+                <img src={logoUrl} alt={orgName} className="h-11 w-11 object-cover rounded-full ring-1 ring-[#E4E4E7]" data-testid="brand-logo" />
               ) : (
-                <div
-                  className="h-11 w-11 rounded-full ring-1 ring-[#E4E4E7] bg-[#09090B] text-white flex items-center justify-center font-display font-bold text-sm tracking-tight"
-                  data-testid="brand-logo-fallback"
-                >
+                <div className="h-11 w-11 rounded-full ring-1 ring-[#E4E4E7] bg-[#09090B] text-white flex items-center justify-center font-display font-bold text-sm tracking-tight" data-testid="brand-logo-fallback">
                   {orgName.slice(0, 2).toUpperCase()}
                 </div>
               )}
@@ -83,61 +85,108 @@ export default function Layout() {
               </div>
             </Link>
 
-            <form onSubmit={submitSearch} className="flex-1 max-w-md" data-testid="global-search-form">
-              <div className="relative">
-                <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#71717A]" />
-                <input
-                  data-testid="global-search-input"
-                  type="text"
-                  value={globalQ}
-                  onChange={(e) => setGlobalQ(e.target.value)}
-                  placeholder="Search costumes / accessories…"
-                  className="w-full pl-10 pr-9 h-10 border border-[#E4E4E7] bg-white text-sm focus:outline-none focus:border-[#09090B]"
-                />
-                {globalQ && (
-                  <button
-                    type="button"
-                    onClick={clearSearch}
-                    data-testid="global-search-clear"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[#71717A] hover:text-[#09090B]"
-                    aria-label="Clear search"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                )}
-              </div>
-            </form>
+            <div className="flex-1 flex items-center justify-end gap-2">
+              {searchOpen ? (
+                <form onSubmit={submitSearch} className="flex-1 max-w-md" data-testid="global-search-form">
+                  <div className="relative">
+                    <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#71717A]" />
+                    <input
+                      ref={searchInputRef}
+                      data-testid="global-search-input"
+                      type="text"
+                      value={globalQ}
+                      onChange={(e) => setGlobalQ(e.target.value)}
+                      placeholder="Search costumes / accessories…"
+                      className="w-full pl-10 pr-9 h-10 border border-[#E4E4E7] bg-white text-sm focus:outline-none focus:border-[#09090B]"
+                      onBlur={() => { if (!globalQ.trim()) setSearchOpen(false); }}
+                    />
+                    <button
+                      type="button"
+                      onClick={clearAndCloseSearch}
+                      data-testid="global-search-close"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[#71717A] hover:text-[#09090B]"
+                      aria-label="Close search"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <button
+                  type="button"
+                  data-testid="global-search-open"
+                  onClick={() => setSearchOpen(true)}
+                  aria-label="Open search"
+                  className="p-2.5 border border-[#E4E4E7] hover:border-[#09090B] text-[#09090B]"
+                >
+                  <Search className="h-4 w-4" />
+                </button>
+              )}
 
-            <nav className="flex items-center gap-1" data-testid="main-nav">
+              <nav className="hidden md:flex items-center gap-1" data-testid="main-nav">
+                {navItems.map(({ to, label, icon: Icon, testId }) => {
+                  const active = to === "/" ? location.pathname === "/" : location.pathname.startsWith(to);
+                  return (
+                    <NavLink
+                      key={to}
+                      to={to}
+                      data-testid={testId}
+                      className={`flex items-center gap-2 px-3 lg:px-4 py-2 text-sm font-medium border ${
+                        active
+                          ? "bg-[#09090B] text-white border-[#09090B]"
+                          : "bg-white text-[#09090B] border-transparent hover:border-[#E4E4E7]"
+                      }`}
+                    >
+                      <Icon className="h-4 w-4" strokeWidth={2} />
+                      <span className="hidden lg:inline">{label}</span>
+                    </NavLink>
+                  );
+                })}
+              </nav>
+
+              {/* Mobile hamburger */}
+              <button
+                type="button"
+                data-testid="mobile-nav-toggle"
+                onClick={() => setMobileNavOpen((v) => !v)}
+                aria-label="Toggle navigation"
+                className="md:hidden p-2.5 border border-[#E4E4E7] hover:border-[#09090B] text-[#09090B]"
+              >
+                {mobileNavOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+
+          {/* Mobile nav drawer */}
+          {mobileNavOpen && (
+            <nav className="md:hidden border-t border-[#E4E4E7] py-2 grid grid-cols-3 gap-1" data-testid="mobile-nav">
               {navItems.map(({ to, label, icon: Icon, testId }) => {
                 const active = to === "/" ? location.pathname === "/" : location.pathname.startsWith(to);
                 return (
                   <NavLink
                     key={to}
                     to={to}
-                    data-testid={testId}
-                    className={`flex items-center gap-2 px-3 lg:px-4 py-2 text-sm font-medium border ${
-                      active
-                        ? "bg-[#09090B] text-white border-[#09090B]"
-                        : "bg-white text-[#09090B] border-transparent hover:border-[#E4E4E7]"
+                    data-testid={`mobile-${testId}`}
+                    className={`flex flex-col items-center gap-1 p-2 text-xs font-medium border ${
+                      active ? "bg-[#09090B] text-white border-[#09090B]" : "text-[#09090B] border-[#E4E4E7]"
                     }`}
                   >
                     <Icon className="h-4 w-4" strokeWidth={2} />
-                    <span className="hidden lg:inline">{label}</span>
+                    <span>{label}</span>
                   </NavLink>
                 );
               })}
             </nav>
-          </div>
+          )}
         </div>
       </header>
-      <main className="max-w-[1400px] mx-auto px-6 md:px-10 py-8 md:py-12">
+      <main className="max-w-[1400px] mx-auto px-4 sm:px-6 md:px-10 py-8 md:py-12">
         <Outlet />
       </main>
       <footer className="border-t border-[#E4E4E7] mt-16">
-        <div className="max-w-[1400px] mx-auto px-6 md:px-10 py-6 flex items-center justify-between">
+        <div className="max-w-[1400px] mx-auto px-4 sm:px-6 md:px-10 py-6 flex items-center justify-between">
           <span className="eyebrow" data-testid="footer-org-name">{orgName} — INVENTORY MANAGEMENT</span>
-          <span className="eyebrow">v 1.4</span>
+          <span className="eyebrow">v 1.5</span>
         </div>
       </footer>
     </div>

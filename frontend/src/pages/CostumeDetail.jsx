@@ -96,6 +96,25 @@ export default function CostumeDetail() {
                         <div className="flex-1 min-w-0">
                           <div className="font-medium text-[#7F1D1D]">{cat?.name || "Unknown flag"}</div>
                           {f.note && <p className="text-sm text-[#7F1D1D] whitespace-pre-wrap mt-0.5">{f.note}</p>}
+                          {(f.image_ids || []).length > 0 && (
+                            <div className="grid grid-cols-4 sm:grid-cols-6 gap-1.5 mt-2" data-testid={`detail-flag-images-${f.id}`}>
+                              {f.image_ids.map((iid, idx) => (
+                                <a
+                                  key={idx}
+                                  href={`${process.env.REACT_APP_BACKEND_URL}/api/images/${iid}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="aspect-square border border-[#FCA5A5] overflow-hidden hover:border-[#B91C1C]"
+                                >
+                                  <img
+                                    src={`${process.env.REACT_APP_BACKEND_URL}/api/images/${iid}`}
+                                    alt=""
+                                    className="w-full h-full object-cover"
+                                  />
+                                </a>
+                              ))}
+                            </div>
+                          )}
                           {f.created_at && (
                             <p className="text-[10px] text-[#B91C1C] font-mono-label mt-0.5">
                               {new Date(f.created_at).toLocaleString()}
@@ -257,12 +276,55 @@ export default function CostumeDetail() {
             )}
           </div>
 
+          {costume.in_use && (
+            <div className="border border-[#10B981] bg-[#ECFDF5] p-5" data-testid="detail-in-use-banner">
+              <div className="flex items-start gap-3">
+                <Sparkles className="h-5 w-5 text-[#059669] mt-0.5 shrink-0" />
+                <div className="flex-1">
+                  <div className="eyebrow text-[#065F46]">CURRENTLY IN USE</div>
+                  {costume.in_use_note ? (
+                    <p className="text-sm text-[#064E3B] whitespace-pre-wrap mt-1">{costume.in_use_note}</p>
+                  ) : (
+                    <p className="text-sm text-[#064E3B] mt-1">This piece is checked out for a live production.</p>
+                  )}
+                  {costume.in_use_since && (
+                    <p className="text-[10px] font-mono-label text-[#059669] mt-1.5">IN USE SINCE {new Date(costume.in_use_since).toLocaleString()}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {costume.notes ? (
             <div>
               <div className="eyebrow mb-2">GENERAL NOTES</div>
               <p className="text-sm text-[#27272A] leading-relaxed whitespace-pre-wrap" data-testid="detail-notes">{costume.notes}</p>
             </div>
           ) : null}
+
+          {(costume.note_image_ids || []).length > 0 && (
+            <div data-testid="detail-note-images">
+              <div className="eyebrow mb-2">ATTACHED IMAGES</div>
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                {costume.note_image_ids.map((iid, idx) => (
+                  <a
+                    key={idx}
+                    href={`${process.env.REACT_APP_BACKEND_URL}/api/images/${iid}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="aspect-square border border-[#E4E4E7] overflow-hidden hover:border-[#09090B]"
+                    data-testid={`detail-note-image-${idx}`}
+                  >
+                    <img
+                      src={`${process.env.REACT_APP_BACKEND_URL}/api/images/${iid}`}
+                      alt=""
+                      className="w-full h-full object-cover"
+                    />
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="flex gap-3">
             <Button data-testid="detail-edit-btn" onClick={() => setEditOpen(true)} className="bg-[#09090B] hover:bg-[#27272A] text-white rounded-none h-11">
@@ -288,7 +350,7 @@ export default function CostumeDetail() {
         locations={locations}
         sizingSystems={sizingSystems}
         shows={shows}
-        onSaved={() => { setEditOpen(false); fetchAll(); }}
+        onSaved={(opts) => { if (!opts?.refresh_only) setEditOpen(false); fetchAll(); }}
       />
     </div>
   );

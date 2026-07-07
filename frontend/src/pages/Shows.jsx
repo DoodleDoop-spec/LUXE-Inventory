@@ -17,7 +17,7 @@ export default function Shows() {
   const [expandedYear, setExpandedYear] = useState({});
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: "", year: "", notes: "", show_link: "", image_id: null });
+  const [form, setForm] = useState({ name: "", year: "", notes: "", show_link: "", link_timestamp: "", image_id: null });
   const [uploading, setUploading] = useState(false);
 
   const fetchAll = async () => {
@@ -58,7 +58,7 @@ export default function Shows() {
   }, [costumes]);
 
   const openNew = () => {
-    setForm({ name: "", year: "", notes: "", show_link: "", image_id: null });
+    setForm({ name: "", year: "", notes: "", show_link: "", link_timestamp: "", image_id: null });
     setDialogOpen(true);
   };
 
@@ -93,6 +93,7 @@ export default function Shows() {
         year,
         notes: form.notes.trim(),
         show_link: form.show_link.trim(),
+        link_timestamp: form.link_timestamp.trim(),
         image_id: form.image_id,
       });
       toast.success("Show added");
@@ -232,6 +233,14 @@ export default function Shows() {
                 placeholder="e.g. YouTube or Vimeo URL"
                 className="rounded-none border-[#E4E4E7] h-11"
               />
+              <Input
+                data-testid="show-form-timestamp"
+                value={form.link_timestamp}
+                onChange={(e) => setForm({ ...form, link_timestamp: e.target.value })}
+                placeholder="Optional timestamp (e.g. 1:23 or 1:23:45)"
+                className="rounded-none border-[#E4E4E7] h-11"
+              />
+              <p className="text-[10px] text-[#A1A1AA] font-mono-label">START THE VIDEO AT THIS EXACT MOMENT WHEN OPENED</p>
             </div>
             <div className="space-y-2">
               <Label className="eyebrow">NOTES</Label>

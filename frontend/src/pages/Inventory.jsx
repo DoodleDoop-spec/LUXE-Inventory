@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { api } from "@/lib/api";
-import { Plus, Search, LayoutGrid, List, X, MapPin, ChevronRight, Flag, StickyNote, SlidersHorizontal, ArrowUpDown, Calendar, Image as ImageIcon, Package, Tag as TagIcon } from "lucide-react";
+import { Plus, Search, LayoutGrid, List, X, MapPin, ChevronRight, Flag, StickyNote, SlidersHorizontal, ArrowUpDown, Calendar, Image as ImageIcon, Package, Tag as TagIcon, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -152,7 +152,11 @@ export default function Inventory() {
     }
   };
 
-  const handleSaved = () => { setDialogOpen(false); fetchAll(); };
+  const handleSaved = (opts) => {
+    if (opts && opts.refresh_only) { fetchAll(); return; }
+    setDialogOpen(false);
+    fetchAll();
+  };
 
   const handleDropOnCategory = async (categoryName) => {
     if (!dragging || dragging.category === categoryName) return;
@@ -590,6 +594,12 @@ function CostumeCard({ costume, onEdit, onDelete, sizingSystems, showsById, cate
             <div className="absolute top-2 right-2 bg-[#EF4444] text-white px-2 py-1 flex items-center gap-1" data-testid={`flag-badge-${costume.id}`}>
               <Flag className="h-3 w-3" fill="currentColor" />
               <span className="text-[10px] font-mono-label">FLAGGED</span>
+            </div>
+          )}
+          {costume.in_use && (
+            <div className="absolute top-2 left-2 bg-[#10B981] text-white px-2 py-1 flex items-center gap-1" data-testid={`in-use-badge-${costume.id}`}>
+              <Sparkles className="h-3 w-3" />
+              <span className="text-[10px] font-mono-label">IN USE</span>
             </div>
           )}
           {costume.origin_year && (
