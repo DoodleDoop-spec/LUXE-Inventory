@@ -8,25 +8,28 @@ export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [recent, setRecent] = useState([]);
   const [flagged, setFlagged] = useState([]);
+  const [orgName, setOrgName] = useState("LUXE");
 
   useEffect(() => {
     (async () => {
       try {
-        const [s, r, f] = await Promise.all([
+        const [s, r, f, settings] = await Promise.all([
           api.get("/stats"),
           api.get("/costumes", { params: { sort: "origin_year_desc" } }),
           api.get("/flagged"),
+          api.get("/settings"),
         ]);
         setStats(s.data);
         setRecent(r.data.slice(0, 8));
         setFlagged(f.data);
+        setOrgName((settings.data.org_name || "LUXE").trim() || "LUXE");
       } catch (e) { console.error(e); }
     })();
   }, []);
 
   const tiles = [
-    { label: "Total Costumes", value: stats?.total_costumes ?? "—", icon: Package, testId: "stat-total-costumes" },
-    { label: "Total Items", value: stats?.total_items ?? "—", icon: Boxes, testId: "stat-total-items" },
+    { label: "Total Items", value: stats?.total_costumes ?? "—", icon: Package, testId: "stat-total-costumes" },
+    { label: "Total Units", value: stats?.total_items ?? "—", icon: Boxes, testId: "stat-total-items" },
     { label: "Categories", value: stats?.category_count ?? "—", icon: Tag, testId: "stat-categories" },
     { label: "Flagged", value: stats?.flagged_count ?? 0, icon: Flag, testId: "stat-flagged" },
   ];
@@ -37,7 +40,7 @@ export default function Dashboard() {
         <div className="md:col-span-8 space-y-4">
           <div className="eyebrow">OVERVIEW</div>
           <h1 className="font-display text-4xl sm:text-5xl lg:text-6xl tracking-tight font-bold text-[#09090B] leading-[1.05]" data-testid="dashboard-title">
-            LUXE Inventory Management System
+            {orgName} Inventory Management
           </h1>
         </div>
         <div className="md:col-span-4 flex md:justify-end gap-3">
@@ -50,7 +53,7 @@ export default function Dashboard() {
           <Link to="/inventory?new=1">
             <Button data-testid="hero-add-costume" className="bg-[#09090B] hover:bg-[#27272A] rounded-none h-11 px-5 text-white">
               <Plus className="h-4 w-4 mr-1" />
-              Add Costume
+              Add Item
             </Button>
           </Link>
         </div>

@@ -624,3 +624,181 @@ class TestGroupsIteration7:
         r = session.post(f"{API}/groups", json={"name": "  "})
         assert r.status_code == 400
 
+
+
+# ==============================================================
+# Iteration 8 — Flags system, org branding, buy_link, show_link, category color
+# ==============================================================
+class TestIteration8:
+    def test_settings_org_and_logo(self, session):
+        r = session.get(f"{API}/settings")
+        assert r.status_code == 200
+        s = r.json()
+        assert "org_name" in s
+        assert "logo_image_id" in s
+        original_org = s["org_name"]
+        original_logo = s["logo_image_id"]
+        try:
+            r = session.put(f"{API}/settings", json={"org_name": "TEST_ORG", "logo_image_id": "img-xyz"})
+            assert r.status_code == 200
+            s2 = r.json()
+            assert s2["org_name"] == "TEST_ORG"
+            assert s2["logo_image_id"] == "img-xyz"
+            # clear logo with empty string
+            r = session.put(f"{API}/settings", json={"logo_image_id": ""})
+            assert r.status_code == 200
+            assert r.json()["logo_image_id"] is None
+        finally:
+            session.put(f"{API}/settings", json={"org_name": original_org or "LUXE", "logo_image_id": original_logo or ""})
+
+    def test_flag_categories_seeded_defaults(self, session):
+        r = session.get(f"{API}/flag-categories")
+        assert r.status_code == 200
+        names = {c["name"] for c in r.json()}
+        assert {"On Loan", "Needs Repair", "In Cleaning"}.issubset(names), f"missing seeds: {names}"
+
+    def test_flag_category_crud_and_cascade(self, session):
+        # Create
+        name = f"TEST_FC_{uuid.uuid4().hex[:6]}"
+        r = session.post(f"{API}/flag-categories", json={"name": name, "color": "#123456"})
+        assert r.status_code == 200, r.text
+        fc = r.json()
+        fc_id = fc["id"]
+        assert fc["color"] == "#123456"
+        # Duplicate
+        r = session.post(f"{API}/flag-categories", json={"name": name})
+        assert r.status_code == 409
+        # Update
+        r = session.put(f"{API}/flag-categories/{fc_id}", json={"name": name + "_2", "color": "#654321"})
+        assert r.status_code == 200
+        assert r.json()["name"] == name + "_2"
+        assert r.json()["color"] == "#654321"
+
+        # Attach to a costume; delete FC and verify cascade
+        c = session.post(f"{API}/costumes", json={
+            "name": f"TEST_FL_{uuid.uuid4().hex[:6]}", "category": "Modern",
+            "location": "Main Wardrobe", "sizes": {"S": 1},
+            "flags": [{"category_id": fc_id, "note": "will cascade"}]
+        }).json()
+        cid = c["id"]
+        assert c["is_flagged"] is True
+        assert len(c["flags"]) == 1
+        # Costumes-by-flag endpoint
+        r = session.get(f"{API}/flag-categories/{fc_id}/costumes")
+        assert r.status_code == 200
+        assert any(x["id"] == cid for x in r.json())
+
+        # Delete cascade
+        r = session.delete(f"{API}/flag-categories/{fc_id}")
+        assert r.status_code == 200
+        # Costume should now have 0 flags and is_flagged False
+        c2 = session.get(f"{API}/costumes/{cid}").json()
+        assert c2["flags"] == []
+        assert c2["is_flagged"] is False
+        session.delete(f"{API}/costumes/{cid}")
+
+    def test_costume_create_with_flags_and_flag_endpoints(self, session):
+        # Get a flag category id (use seeded)
+        fcs = session.get(f"{API}/flag-categories").json()
+        fc = next(c for c in fcs if c["name"] == "On Loan")
+        fc2 = next(c for c in fcs if c["name"] == "Needs Repair")
+
+        r = session.post(f"{API}/costumes", json={
+            "name": f"TEST_MF_{uuid.uuid4().hex[:6]}", "category": "Modern",
+            "location": "Main Wardrobe", "sizes": {"S": 1},
+            "flags": [{"category_id": fc["id"], "note": "note A"}]
+        })
+        assert r.status_code == 200, r.text
+        c = r.json()
+        cid = c["id"]
+        try:
+            assert c["is_flagged"] is True
+            assert len(c["flags"]) == 1
+            assert c["flags"][0]["note"] == "note A"
+            assert "note A" in c["flag_reason"]
+
+            # POST attach second flag
+            r = session.post(f"{API}/costumes/{cid}/flags", json={"category_id": fc2["id"], "note": "note B"})
+            assert r.status_code == 200
+            c = r.json()
+            assert len(c["flags"]) == 2
+            assert c["is_flagged"] is True
+            second = next(f for f in c["flags"] if f["note"] == "note B")
+
+            # PUT update note
+            r = session.put(f"{API}/costumes/{cid}/flags/{second['id']}", json={"note": "note B updated"})
+            assert r.status_code == 200
+            c = r.json()
+            assert any(f["id"] == second["id"] and f["note"] == "note B updated" for f in c["flags"])
+
+            # DELETE detach both — after first, is_flagged still True
+            first_id = c["flags"][0]["id"]
+            r = session.delete(f"{API}/costumes/{cid}/flags/{first_id}")
+            assert r.status_code == 200
+            c = r.json()
+            assert len(c["flags"]) == 1
+            assert c["is_flagged"] is True
+
+            r = session.delete(f"{API}/costumes/{cid}/flags/{second['id']}")
+            assert r.status_code == 200
+            c = r.json()
+            assert len(c["flags"]) == 0
+            assert c["is_flagged"] is False
+        finally:
+            session.delete(f"{API}/costumes/{cid}")
+
+    def test_costume_buy_link_persists(self, session):
+        r = session.post(f"{API}/costumes", json={
+            "name": f"TEST_BL_{uuid.uuid4().hex[:6]}", "category": "Modern",
+            "location": "Main Wardrobe", "sizes": {"S": 1},
+            "buy_link": "https://example.com/buy",
+        })
+        assert r.status_code == 200, r.text
+        c = r.json()
+        assert c["buy_link"] == "https://example.com/buy"
+        got = session.get(f"{API}/costumes/{c['id']}").json()
+        assert got["buy_link"] == "https://example.com/buy"
+        # PUT update
+        session.put(f"{API}/costumes/{c['id']}", json={"buy_link": "https://example.com/updated"})
+        got2 = session.get(f"{API}/costumes/{c['id']}").json()
+        assert got2["buy_link"] == "https://example.com/updated"
+        session.delete(f"{API}/costumes/{c['id']}")
+
+    def test_category_color_update_and_cascade_rename(self, session):
+        name = f"TEST_CATCLR_{uuid.uuid4().hex[:6]}"
+        cat = session.post(f"{API}/categories", json={"name": name}).json()
+        cid = cat["id"]
+        try:
+            r = session.put(f"{API}/categories/{cid}", json={"color": "#ABCDEF"})
+            assert r.status_code == 200
+            assert r.json()["color"] == "#ABCDEF"
+
+            # Create costume under this cat then rename cat -> costume.category should follow
+            c = session.post(f"{API}/costumes", json={
+                "name": f"TEST_CC_{uuid.uuid4().hex[:6]}", "category": name,
+                "location": "Main Wardrobe", "sizes": {"S": 1},
+            }).json()
+            new_name = name + "_R"
+            r = session.put(f"{API}/categories/{cid}", json={"name": new_name})
+            assert r.status_code == 200
+            got = session.get(f"{API}/costumes/{c['id']}").json()
+            assert got["category"] == new_name
+            session.delete(f"{API}/costumes/{c['id']}")
+        finally:
+            session.delete(f"{API}/categories/{cid}")
+
+    def test_show_link_persists(self, session):
+        r = session.post(f"{API}/shows", json={
+            "name": f"TEST_SL_{uuid.uuid4().hex[:6]}", "year": 2020, "show_link": "https://youtu.be/abc"
+        })
+        assert r.status_code == 200, r.text
+        s = r.json()
+        assert s["show_link"] == "https://youtu.be/abc"
+        r = session.put(f"{API}/shows/{s['id']}", json={
+            "name": s["name"], "year": 2020, "show_link": "https://youtu.be/xyz"
+        })
+        assert r.status_code == 200
+        assert r.json()["show_link"] == "https://youtu.be/xyz"
+        got = next(x for x in session.get(f"{API}/shows").json() if x["id"] == s["id"])
+        assert got["show_link"] == "https://youtu.be/xyz"
+        session.delete(f"{API}/shows/{s['id']}")

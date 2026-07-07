@@ -114,6 +114,13 @@ DEFAULT_SIZING_SYSTEMS = [
 ]
 
 
+class CostumeFlag(BaseModel):
+    id: str
+    category_id: str
+    note: Optional[str] = ""
+    created_at: str
+
+
 class CostumeBase(BaseModel):
     name: str
     category: str
@@ -126,6 +133,7 @@ class CostumeBase(BaseModel):
     size_notes: Dict[str, str] = Field(default_factory=dict)
     keywords: List[str] = Field(default_factory=list)
     creator: Optional[str] = ""
+    buy_link: Optional[str] = ""
     original_show_id: Optional[str] = None
     additional_show_ids: List[str] = Field(default_factory=list)
     group_id: Optional[str] = None
@@ -136,6 +144,7 @@ class CostumeCreate(CostumeBase):
     image_id: Optional[str] = None
     is_flagged: Optional[bool] = False
     flag_reason: Optional[str] = ""
+    flags: Optional[List[Dict]] = None
 
 
 class CostumeUpdate(BaseModel):
@@ -150,17 +159,41 @@ class CostumeUpdate(BaseModel):
     size_notes: Optional[Dict[str, str]] = None
     keywords: Optional[List[str]] = None
     creator: Optional[str] = None
+    buy_link: Optional[str] = None
     original_show_id: Optional[str] = None
     additional_show_ids: Optional[List[str]] = None
     image_id: Optional[str] = None
     is_flagged: Optional[bool] = None
     flag_reason: Optional[str] = None
+    flags: Optional[List[Dict]] = None
     group_id: Optional[str] = None
     variant_label: Optional[str] = None
 
 
 class FlagPayload(BaseModel):
     reason: str
+
+
+class FlagCategoryPayload(BaseModel):
+    name: str
+    color: Optional[str] = "#EF4444"
+
+
+class FlagCategory(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    name: str
+    color: str = "#EF4444"
+    created_at: str
+
+
+class AttachFlagPayload(BaseModel):
+    category_id: str
+    note: Optional[str] = ""
+
+
+class UpdateFlagPayload(BaseModel):
+    note: Optional[str] = ""
 
 
 class Costume(BaseModel):
@@ -177,6 +210,7 @@ class Costume(BaseModel):
     size_notes: Dict[str, str] = Field(default_factory=dict)
     keywords: List[str] = Field(default_factory=list)
     creator: str = ""
+    buy_link: str = ""
     original_show_id: Optional[str] = None
     additional_show_ids: List[str] = Field(default_factory=list)
     origin_year: Optional[int] = None
@@ -185,6 +219,7 @@ class Costume(BaseModel):
     is_flagged: bool = False
     flag_reason: str = ""
     flagged_at: Optional[str] = None
+    flags: List[Dict] = Field(default_factory=list)
     created_at: str
     updated_at: str
     group_id: Optional[str] = None
@@ -230,6 +265,7 @@ class Show(BaseModel):
     year: Optional[int] = None
     image_id: Optional[str] = None
     notes: Optional[str] = ""
+    show_link: Optional[str] = ""
     created_at: str
 
 
@@ -238,6 +274,7 @@ class ShowPayload(BaseModel):
     year: Optional[int] = None
     image_id: Optional[str] = None
     notes: Optional[str] = ""
+    show_link: Optional[str] = ""
 
 
 class SubcategoryPayload(BaseModel):
@@ -433,6 +470,21 @@ async def create_costume(payload: CostumeCreate):
     size_notes = {str(k): str(v or "") for k, v in (payload.size_notes or {}).items()}
     keywords = [k.strip() for k in (payload.keywords or []) if k and k.strip()]
     origin_year = await _resolve_origin_year(payload.original_show_id)
+    # Normalize flags list
+    flags = []
+    for f in (payload.flags or []):
+        if not isinstance(f, dict) or not f.get("category_id"):
+            continue
+        flags.append({
+            "id": f.get("id") or str(uuid.uuid4()),
+            "category_id": f["category_id"],
+            "note": (f.get("note") or "").strip(),
+            "created_at": f.get("created_at") or now,
+        })
+    is_flagged = bool(payload.is_flagged) or len(flags) > 0
+    flag_reason = (payload.flag_reason or "").strip() if is_flagged else ""
+    if not flag_reason and flags:
+        flag_reason = " · ".join([f["note"] for f in flags if f["note"]])
     doc = {
         "id": str(uuid.uuid4()),
         "name": payload.name.strip(),
@@ -446,14 +498,16 @@ async def create_costume(payload: CostumeCreate):
         "size_notes": size_notes,
         "keywords": keywords,
         "creator": (payload.creator or "").strip(),
+        "buy_link": (payload.buy_link or "").strip(),
         "original_show_id": payload.original_show_id,
         "additional_show_ids": list(payload.additional_show_ids or []),
         "origin_year": origin_year,
         "total_quantity": _compute_total(sizes),
         "image_id": payload.image_id,
-        "is_flagged": bool(payload.is_flagged),
-        "flag_reason": (payload.flag_reason or "").strip() if payload.is_flagged else "",
-        "flagged_at": now if payload.is_flagged else None,
+        "is_flagged": is_flagged,
+        "flag_reason": flag_reason,
+        "flagged_at": now if is_flagged else None,
+        "flags": flags,
         "group_id": payload.group_id,
         "variant_label": (payload.variant_label or "").strip(),
         "created_at": now,
@@ -480,12 +534,36 @@ async def update_costume(costume_id: str, payload: CostumeUpdate):
         updates["keywords"] = [k.strip() for k in (updates["keywords"] or []) if k and k.strip()]
     if "original_show_id" in updates:
         updates["origin_year"] = await _resolve_origin_year(updates["original_show_id"])
-    if "is_flagged" in updates:
+    if "flags" in updates:
+        raw = updates["flags"] or []
+        normalized = []
+        now_ts = _now_iso()
+        for f in raw:
+            if not isinstance(f, dict) or not f.get("category_id"):
+                continue
+            normalized.append({
+                "id": f.get("id") or str(uuid.uuid4()),
+                "category_id": f["category_id"],
+                "note": (f.get("note") or "").strip(),
+                "created_at": f.get("created_at") or now_ts,
+            })
+        updates["flags"] = normalized
+        updates["is_flagged"] = len(normalized) > 0 or updates.get("is_flagged", existing.get("is_flagged", False))
+        if normalized:
+            updates["flagged_at"] = updates.get("flagged_at") or _now_iso()
+            if not updates.get("flag_reason"):
+                updates["flag_reason"] = " · ".join([f["note"] for f in normalized if f["note"]])
+        else:
+            if not updates.get("is_flagged"):
+                updates["flag_reason"] = ""
+                updates["flagged_at"] = None
+    if "is_flagged" in updates and "flags" not in updates:
         if updates["is_flagged"]:
             updates["flagged_at"] = _now_iso()
         else:
             updates["flagged_at"] = None
             updates["flag_reason"] = ""
+            updates["flags"] = []
     updates["updated_at"] = _now_iso()
     await db.costumes.update_one({"id": costume_id}, {"$set": updates})
     doc = await db.costumes.find_one({"id": costume_id}, {"_id": 0})
@@ -650,17 +728,17 @@ async def list_categories():
     for d in docs:
         original = d.get("subcategories")
         normalized = _normalize_subcategories(original)
-        # Persist normalization once if the stored form was legacy strings
         needs_migration = any(isinstance(s, str) for s in (original or []))
         if needs_migration:
             await db.categories.update_one({"id": d["id"]}, {"$set": {"subcategories": normalized}})
         d["subcategories"] = normalized
+        d.setdefault("color", "#71717A")
     existing = {d["name"] for d in docs}
     used = await db.costumes.distinct("category")
     for u in used:
         if u and u not in existing:
             new_id = str(uuid.uuid4())
-            new_doc = {"id": new_id, "name": u, "subcategories": [], "created_at": _now_iso()}
+            new_doc = {"id": new_id, "name": u, "subcategories": [], "color": "#71717A", "created_at": _now_iso()}
             await db.categories.insert_one(dict(new_doc))
             docs.append(new_doc)
             existing.add(u)
@@ -676,11 +754,44 @@ async def create_category(payload: LocationCreate):
     if existing:
         existing.pop("_id", None)
         existing["subcategories"] = _normalize_subcategories(existing.get("subcategories"))
+        existing.setdefault("color", "#71717A")
         return existing
-    doc = {"id": str(uuid.uuid4()), "name": name, "subcategories": [], "created_at": _now_iso()}
+    doc = {"id": str(uuid.uuid4()), "name": name, "subcategories": [], "color": "#71717A", "created_at": _now_iso()}
     await db.categories.insert_one(doc)
     doc.pop("_id", None)
     return doc
+
+
+class CategoryUpdate(BaseModel):
+    name: Optional[str] = None
+    color: Optional[str] = None
+
+
+@api_router.put("/categories/{category_id}")
+async def update_category(category_id: str, payload: CategoryUpdate):
+    doc = await db.categories.find_one({"id": category_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Category not found")
+    updates = {}
+    if payload.name is not None:
+        new_name = payload.name.strip()
+        if not new_name:
+            raise HTTPException(status_code=400, detail="Name required")
+        if new_name != doc.get("name"):
+            dupe = await db.categories.find_one({"name": new_name, "id": {"$ne": category_id}})
+            if dupe:
+                raise HTTPException(status_code=409, detail="Another category has that name")
+            # Cascade rename to costumes
+            await db.costumes.update_many({"category": doc["name"]}, {"$set": {"category": new_name}})
+            updates["name"] = new_name
+    if payload.color is not None:
+        updates["color"] = payload.color.strip() or "#71717A"
+    if updates:
+        await db.categories.update_one({"id": category_id}, {"$set": updates})
+    updated = await db.categories.find_one({"id": category_id}, {"_id": 0})
+    updated.setdefault("color", "#71717A")
+    updated["subcategories"] = _normalize_subcategories(updated.get("subcategories"))
+    return updated
 
 
 @api_router.delete("/categories/{category_id}")
@@ -942,6 +1053,7 @@ async def create_show(payload: ShowPayload):
         "year": year,
         "image_id": payload.image_id,
         "notes": (payload.notes or "").strip(),
+        "show_link": (payload.show_link or "").strip(),
         "created_at": _now_iso(),
     }
     await db.shows.insert_one(doc)
@@ -966,6 +1078,7 @@ async def update_show(show_id: str, payload: ShowPayload):
         "year": year,
         "image_id": payload.image_id,
         "notes": (payload.notes or "").strip(),
+        "show_link": (payload.show_link or "").strip(),
     }
     await db.shows.update_one({"id": show_id}, {"$set": updates})
     await db.costumes.update_many(
@@ -999,17 +1112,23 @@ async def get_settings():
     if not doc:
         doc = {
             "id": "app",
-            "org_name": "Wardrobe/OS",
+            "org_name": "LUXE",
+            "logo_image_id": None,
             "default_view": "grid",
             "show_flag_banner": True,
         }
         await db.settings.insert_one(doc)
         doc.pop("_id", None)
+    doc.setdefault("org_name", "LUXE")
+    doc.setdefault("logo_image_id", None)
+    doc.setdefault("default_view", "grid")
+    doc.setdefault("show_flag_banner", True)
     return doc
 
 
 class SettingsUpdate(BaseModel):
     org_name: Optional[str] = None
+    logo_image_id: Optional[str] = None
     default_view: Optional[str] = None
     show_flag_banner: Optional[bool] = None
 
@@ -1019,6 +1138,8 @@ async def update_settings(payload: SettingsUpdate):
     updates = {k: v for k, v in payload.model_dump(exclude_none=True).items()}
     if "default_view" in updates and updates["default_view"] not in ("grid", "list"):
         raise HTTPException(status_code=400, detail="default_view must be 'grid' or 'list'")
+    if "logo_image_id" in updates and updates["logo_image_id"] == "":
+        updates["logo_image_id"] = None
     await db.settings.update_one({"id": "app"}, {"$set": updates}, upsert=True)
     doc = await db.settings.find_one({"id": "app"}, {"_id": 0})
     return doc
@@ -1028,6 +1149,153 @@ async def update_settings(payload: SettingsUpdate):
 async def list_flagged():
     docs = await db.costumes.find({"is_flagged": True}, {"_id": 0}).sort("flagged_at", -1).to_list(1000)
     return docs
+
+
+# --------- Flag Category Routes ---------
+DEFAULT_FLAG_CATEGORY_COLORS = ["#EF4444", "#F59E0B", "#10B981", "#3B82F6", "#8B5CF6", "#EC4899"]
+
+
+@api_router.get("/flag-categories", response_model=List[FlagCategory])
+async def list_flag_categories():
+    docs = await db.flag_categories.find({}, {"_id": 0}).sort("created_at", 1).to_list(500)
+    for d in docs:
+        d.setdefault("color", "#EF4444")
+    return docs
+
+
+@api_router.post("/flag-categories", response_model=FlagCategory)
+async def create_flag_category(payload: FlagCategoryPayload):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name required")
+    dupe = await db.flag_categories.find_one({"name": name})
+    if dupe:
+        raise HTTPException(status_code=409, detail="Flag category already exists")
+    color = (payload.color or "#EF4444").strip() or "#EF4444"
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "color": color,
+        "created_at": _now_iso(),
+    }
+    await db.flag_categories.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.put("/flag-categories/{fc_id}", response_model=FlagCategory)
+async def update_flag_category(fc_id: str, payload: FlagCategoryPayload):
+    doc = await db.flag_categories.find_one({"id": fc_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Flag category not found")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name required")
+    dupe = await db.flag_categories.find_one({"name": name, "id": {"$ne": fc_id}})
+    if dupe:
+        raise HTTPException(status_code=409, detail="Another flag category has that name")
+    color = (payload.color or "#EF4444").strip() or "#EF4444"
+    await db.flag_categories.update_one({"id": fc_id}, {"$set": {"name": name, "color": color}})
+    updated = await db.flag_categories.find_one({"id": fc_id}, {"_id": 0})
+    return updated
+
+
+@api_router.delete("/flag-categories/{fc_id}")
+async def delete_flag_category(fc_id: str):
+    doc = await db.flag_categories.find_one({"id": fc_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Flag category not found")
+    # Remove this flag from every costume
+    await db.costumes.update_many(
+        {"flags.category_id": fc_id},
+        {"$pull": {"flags": {"category_id": fc_id}}}
+    )
+    # Refresh is_flagged based on remaining flags for affected costumes
+    async for c in db.costumes.find({"flags": {"$size": 0}, "is_flagged": True}, {"id": 1}):
+        await db.costumes.update_one({"id": c["id"]}, {"$set": {"is_flagged": False, "flag_reason": "", "flagged_at": None}})
+    await db.flag_categories.delete_one({"id": fc_id})
+    return {"ok": True}
+
+
+@api_router.get("/flag-categories/{fc_id}/costumes", response_model=List[Costume])
+async def list_costumes_by_flag_category(fc_id: str):
+    docs = await db.costumes.find({"flags.category_id": fc_id}, {"_id": 0}).sort("flagged_at", -1).to_list(1000)
+    return docs
+
+
+@api_router.post("/costumes/{costume_id}/flags", response_model=Costume)
+async def attach_flag(costume_id: str, payload: AttachFlagPayload):
+    costume = await db.costumes.find_one({"id": costume_id})
+    if not costume:
+        raise HTTPException(status_code=404, detail="Costume not found")
+    fc = await db.flag_categories.find_one({"id": payload.category_id})
+    if not fc:
+        raise HTTPException(status_code=404, detail="Flag category not found")
+    now = _now_iso()
+    new_flag = {
+        "id": str(uuid.uuid4()),
+        "category_id": payload.category_id,
+        "note": (payload.note or "").strip(),
+        "created_at": now,
+    }
+    flags = list(costume.get("flags") or [])
+    flags.append(new_flag)
+    reason = " · ".join([f["note"] for f in flags if f.get("note")])
+    await db.costumes.update_one(
+        {"id": costume_id},
+        {"$set": {
+            "flags": flags,
+            "is_flagged": True,
+            "flag_reason": reason,
+            "flagged_at": now,
+            "updated_at": now,
+        }},
+    )
+    doc = await db.costumes.find_one({"id": costume_id}, {"_id": 0})
+    return doc
+
+
+@api_router.put("/costumes/{costume_id}/flags/{flag_id}", response_model=Costume)
+async def update_costume_flag(costume_id: str, flag_id: str, payload: UpdateFlagPayload):
+    costume = await db.costumes.find_one({"id": costume_id})
+    if not costume:
+        raise HTTPException(status_code=404, detail="Costume not found")
+    flags = list(costume.get("flags") or [])
+    found = False
+    for f in flags:
+        if f.get("id") == flag_id:
+            f["note"] = (payload.note or "").strip()
+            found = True
+            break
+    if not found:
+        raise HTTPException(status_code=404, detail="Flag not found on this costume")
+    reason = " · ".join([f["note"] for f in flags if f.get("note")])
+    await db.costumes.update_one(
+        {"id": costume_id},
+        {"$set": {"flags": flags, "flag_reason": reason, "updated_at": _now_iso()}},
+    )
+    doc = await db.costumes.find_one({"id": costume_id}, {"_id": 0})
+    return doc
+
+
+@api_router.delete("/costumes/{costume_id}/flags/{flag_id}", response_model=Costume)
+async def detach_flag(costume_id: str, flag_id: str):
+    costume = await db.costumes.find_one({"id": costume_id})
+    if not costume:
+        raise HTTPException(status_code=404, detail="Costume not found")
+    flags = [f for f in (costume.get("flags") or []) if f.get("id") != flag_id]
+    reason = " · ".join([f["note"] for f in flags if f.get("note")])
+    updates = {
+        "flags": flags,
+        "flag_reason": reason,
+        "updated_at": _now_iso(),
+    }
+    if not flags:
+        updates["is_flagged"] = False
+        updates["flagged_at"] = None
+    await db.costumes.update_one({"id": costume_id}, {"$set": updates})
+    doc = await db.costumes.find_one({"id": costume_id}, {"_id": 0})
+    return doc
 
 
 # --------- Upload / Image Routes ---------
@@ -1094,13 +1362,35 @@ async def startup():
     # Seed default categories
     cat_count = await db.categories.count_documents({})
     if cat_count == 0:
-        defaults = ["Historical", "Fantasy", "Modern", "Period", "Children", "Animal", "Uniform"]
-        for name in defaults:
+        defaults = [
+            ("Historical", "#8B5CF6"),
+            ("Fantasy", "#EC4899"),
+            ("Modern", "#3B82F6"),
+            ("Period", "#F59E0B"),
+            ("Children", "#10B981"),
+            ("Animal", "#84CC16"),
+            ("Uniform", "#0EA5E9"),
+        ]
+        for name, color in defaults:
             await db.categories.insert_one({
                 "id": str(uuid.uuid4()),
                 "name": name,
                 "subcategories": [],
+                "color": color,
                 "created_at": _now_iso()
+            })
+    # Backfill color on existing categories
+    await db.categories.update_many({"color": {"$exists": False}}, {"$set": {"color": "#71717A"}})
+    # Seed default flag categories
+    fc_count = await db.flag_categories.count_documents({})
+    if fc_count == 0:
+        defaults_fc = [("On Loan", "#F59E0B"), ("Needs Repair", "#EF4444"), ("In Cleaning", "#3B82F6")]
+        for name, color in defaults_fc:
+            await db.flag_categories.insert_one({
+                "id": str(uuid.uuid4()),
+                "name": name,
+                "color": color,
+                "created_at": _now_iso(),
             })
     # Seed default sizing systems
     sys_count = await db.sizing_systems.count_documents({})

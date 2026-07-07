@@ -10,9 +10,8 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
-import { Upload, Image as ImageIcon, X, StickyNote, Flag, Plus } from "lucide-react";
+import { Upload, Image as ImageIcon, X, StickyNote, Flag, Plus, LinkIcon } from "lucide-react";
 
 export default function CostumeFormDialog({
   open, onOpenChange, editing, categories, locations, sizingSystems, shows, groups, onSaved,
@@ -35,7 +34,10 @@ export default function CostumeFormDialog({
   const [saving, setSaving] = useState(false);
   const [isFlagged, setIsFlagged] = useState(false);
   const [flagReason, setFlagReason] = useState("");
+  const [flags, setFlags] = useState([]); // array of {id?, category_id, note}
+  const [flagCategories, setFlagCategories] = useState([]);
   const [creator, setCreator] = useState("");
+  const [buyLink, setBuyLink] = useState("");
   const [originalShowId, setOriginalShowId] = useState("");
   const [additionalShowIds, setAdditionalShowIds] = useState([]);
   const [keywords, setKeywords] = useState([]);
@@ -123,7 +125,9 @@ export default function CostumeFormDialog({
       setImageId(editing.image_id || null);
       setIsFlagged(!!editing.is_flagged);
       setFlagReason(editing.flag_reason || "");
+      setFlags(editing.flags ? editing.flags.map((f) => ({ id: f.id, category_id: f.category_id, note: f.note || "" })) : []);
       setCreator(editing.creator || "");
+      setBuyLink(editing.buy_link || "");
       setOriginalShowId(editing.original_show_id || "");
       setAdditionalShowIds(editing.additional_show_ids || []);
       setKeywords(editing.keywords || []);
@@ -139,7 +143,9 @@ export default function CostumeFormDialog({
       setImageId(null);
       setIsFlagged(false);
       setFlagReason("");
+      setFlags([]);
       setCreator("");
+      setBuyLink("");
       setOriginalShowId("");
       setAdditionalShowIds([]);
       setKeywords([]);
@@ -178,6 +184,17 @@ export default function CostumeFormDialog({
     }
     if (ids.length) setSubcategoryPath(ids);
   }, [open, editing, subcatNodes]);
+
+  // Load flag categories when dialog opens
+  useEffect(() => {
+    if (!open) return;
+    (async () => {
+      try {
+        const r = await api.get("/flag-categories");
+        setFlagCategories(r.data);
+      } catch { /* ignore */ }
+    })();
+  }, [open]);
 
   // Hierarchical location select
   const selectAtLevel = (level, value) => {
@@ -247,13 +264,15 @@ export default function CostumeFormDialog({
     if (!name.trim()) { toast.error("Name is required"); return; }
     if (!finalCategory) { toast.error("Category is required"); return; }
     if (!finalLocation) { toast.error("Location is required"); return; }
-    if (isFlagged && !flagReason.trim()) { toast.error("Flag reason is required"); return; }
 
     setSaving(true);
     try {
       if (category === "__new__" && newCategory.trim()) {
         try { await api.post("/categories", { name: newCategory.trim() }); } catch (err) { /* ignore */ }
       }
+      const cleanedFlags = flags
+        .filter((f) => f.category_id)
+        .map((f) => ({ id: f.id, category_id: f.category_id, note: (f.note || "").trim() }));
       const payload = {
         name: name.trim(),
         category: finalCategory,
@@ -266,11 +285,15 @@ export default function CostumeFormDialog({
         size_notes: Object.fromEntries(sizeKeys.map((s) => [s, (sizeNotes[s] || "").trim()])),
         keywords,
         creator: creator.trim(),
+        buy_link: buyLink.trim(),
         original_show_id: originalShowId || null,
         additional_show_ids: additionalShowIds.filter((x) => x !== originalShowId),
         image_id: imageId,
-        is_flagged: isFlagged,
+        is_flagged: isFlagged || cleanedFlags.length > 0,
         flag_reason: isFlagged ? flagReason.trim() : "",
+        flags: cleanedFlags,
+        group_id: groupId || null,
+        variant_label: variantLabel.trim(),
       };
       if (editing) {
         await api.put(`/costumes/${editing.id}`, payload);
@@ -490,7 +513,7 @@ export default function CostumeFormDialog({
             )}
           </div>
 
-          {/* Creator + Original show + Additional shows + Keywords */}
+          {/* Creator + Buy Link + Original show + Additional shows + Keywords */}
           <div className="grid md:grid-cols-2 gap-5">
             <div className="space-y-2">
               <Label className="eyebrow">CREATOR</Label>
@@ -501,6 +524,20 @@ export default function CostumeFormDialog({
                 placeholder="e.g. Jane Doe"
                 className="rounded-none border-[#E4E4E7] h-11"
               />
+            </div>
+            <div className="space-y-2">
+              <Label className="eyebrow">LINK TO BUY (OPTIONAL)</Label>
+              <div className="relative">
+                <LinkIcon className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#71717A]" />
+                <Input
+                  type="url"
+                  data-testid="form-buy-link"
+                  value={buyLink}
+                  onChange={(e) => setBuyLink(e.target.value)}
+                  placeholder="Where to buy this piece"
+                  className="rounded-none border-[#E4E4E7] h-11 pl-10"
+                />
+              </div>
             </div>
             <div className="space-y-2">
               <Label className="eyebrow">ORIGINAL SHOW</Label>
@@ -596,17 +633,63 @@ export default function CostumeFormDialog({
             <p className="text-xs text-[#A1A1AA]">Assign this piece to a group of variants (same item, different colors, etc.).</p>
           </div>
 
-          {/* Flag */}
-          <div className="border border-[#E4E4E7] p-4 space-y-3">
-            <div className="flex items-center justify-between">
+          {/* Flags (multi) */}
+          <div className="border border-[#E4E4E7] p-4 space-y-3" data-testid="form-flags-section">
+            <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
-                <Flag className={`h-4 w-4 ${isFlagged ? "text-[#EF4444]" : "text-[#71717A]"}`} fill={isFlagged ? "currentColor" : "none"} />
-                <Label className="eyebrow">FLAG THIS COSTUME</Label>
+                <Flag className={`h-4 w-4 ${flags.length > 0 ? "text-[#EF4444]" : "text-[#71717A]"}`} fill={flags.length > 0 ? "currentColor" : "none"} />
+                <Label className="eyebrow">FLAGS</Label>
+                {flags.length > 0 && (
+                  <span className="text-xs text-[#71717A] tabular-nums">{flags.length} attached</span>
+                )}
               </div>
-              <Switch data-testid="form-flag-switch" checked={isFlagged} onCheckedChange={setIsFlagged} />
+              <FlagAddSelect
+                categories={flagCategories}
+                onAdd={(cid) => setFlags((prev) => [...prev, { category_id: cid, note: "" }])}
+              />
             </div>
-            {isFlagged && (
-              <Textarea data-testid="form-flag-reason" value={flagReason} onChange={(e) => setFlagReason(e.target.value)} placeholder="Reason (e.g. Loaned to Company X until 15 April)" rows={2} required className="rounded-none border-[#E4E4E7]" />
+            {flags.length === 0 ? (
+              <p className="text-xs text-[#A1A1AA]">
+                No flags attached. Use flags to mark states like <em>On Loan</em>, <em>Needs Repair</em>, etc.
+                Manage flag types in the Flags tab.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {flags.map((f, idx) => {
+                  const cat = flagCategories.find((c) => c.id === f.category_id);
+                  return (
+                    <div key={idx} className="border border-[#E4E4E7] p-3" data-testid={`form-flag-${idx}`}>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="w-3 h-3"
+                            style={{ backgroundColor: cat?.color || "#71717A" }}
+                            data-testid={`form-flag-color-${idx}`}
+                          />
+                          <span className="font-medium text-sm text-[#09090B]">{cat?.name || "Unknown flag"}</span>
+                        </div>
+                        <button
+                          type="button"
+                          data-testid={`form-flag-remove-${idx}`}
+                          onClick={() => setFlags((prev) => prev.filter((_, i) => i !== idx))}
+                          className="text-[#EF4444] hover:bg-[#FEF2F2] p-1"
+                          aria-label="Remove flag"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <Textarea
+                        data-testid={`form-flag-note-${idx}`}
+                        value={f.note || ""}
+                        onChange={(e) => setFlags((prev) => prev.map((x, i) => i === idx ? { ...x, note: e.target.value } : x))}
+                        rows={2}
+                        placeholder="Note for this flag (e.g. Loaned to Company X until 15 April)"
+                        className="rounded-none border-[#E4E4E7] text-sm"
+                      />
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
 
@@ -651,5 +734,30 @@ export default function CostumeFormDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+
+function FlagAddSelect({ categories, onAdd }) {
+  return (
+    <Select value="__none__" onValueChange={(v) => { if (v && v !== "__none__") onAdd(v); }}>
+      <SelectTrigger data-testid="form-flag-add-select" className="rounded-none border-[#09090B] h-9 w-[220px] text-sm">
+        <SelectValue placeholder="+ Attach flag" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="__none__" disabled>+ Attach flag…</SelectItem>
+        {(categories || []).map((c) => (
+          <SelectItem key={c.id} value={c.id}>
+            <span className="inline-flex items-center gap-2">
+              <span className="w-2.5 h-2.5" style={{ backgroundColor: c.color }} />
+              {c.name}
+            </span>
+          </SelectItem>
+        ))}
+        {(!categories || categories.length === 0) && (
+          <SelectItem value="__empty__" disabled>No flag types — create some in the Flags tab</SelectItem>
+        )}
+      </SelectContent>
+    </Select>
   );
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
-import { ArrowLeft, MapPin, Pencil, Trash2, Flag, StickyNote, Calendar, Tag, Sparkles, Users } from "lucide-react";
+import { ArrowLeft, MapPin, Pencil, Trash2, Flag, StickyNote, Calendar, Tag, Sparkles, Users, ExternalLink, ShoppingBag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import CostumeFormDialog from "@/components/CostumeFormDialog";
 import { toast } from "sonner";
@@ -14,22 +14,25 @@ export default function CostumeDetail() {
   const [locations, setLocations] = useState([]);
   const [sizingSystems, setSizingSystems] = useState([]);
   const [shows, setShows] = useState([]);
+  const [flagCategories, setFlagCategories] = useState([]);
   const [editOpen, setEditOpen] = useState(false);
 
   const fetchAll = async () => {
     try {
-      const [c, cats, locs, systems, sh] = await Promise.all([
+      const [c, cats, locs, systems, sh, fcs] = await Promise.all([
         api.get(`/costumes/${id}`),
         api.get("/categories"),
         api.get("/locations"),
         api.get("/sizing-systems"),
         api.get("/shows"),
+        api.get("/flag-categories"),
       ]);
       setCostume(c.data);
       setCategories(cats.data);
       setLocations(locs.data);
       setSizingSystems(systems.data);
       setShows(sh.data);
+      setFlagCategories(fcs.data);
     } catch (e) {
       toast.error("Could not load costume");
       navigate("/inventory");
@@ -51,12 +54,12 @@ export default function CostumeDetail() {
     navigate("/inventory");
   };
 
-  const handleUnflag = async () => {
+  const handleUnflagOne = async (flagId) => {
     try {
-      await api.post(`/costumes/${id}/unflag`);
+      await api.delete(`/costumes/${id}/flags/${flagId}`);
       toast.success("Flag removed");
       fetchAll();
-    } catch { toast.error("Failed to unflag"); }
+    } catch { toast.error("Failed to remove flag"); }
   };
 
   if (!costume) return <div className="py-20 eyebrow">LOADING…</div>;
@@ -65,6 +68,11 @@ export default function CostumeDetail() {
   const sizeKeys = sys?.sizes || Object.keys(costume.sizes || {});
   const originShow = costume.original_show_id ? showsById[costume.original_show_id] : null;
   const additionalShows = (costume.additional_show_ids || []).map((sid) => showsById[sid]).filter(Boolean);
+  const flagCatById = {};
+  for (const fc of flagCategories) flagCatById[fc.id] = fc;
+  const attachedFlags = costume.flags || [];
+  const currentCategory = categories.find((c) => c.name === costume.category);
+  const catColor = currentCategory?.color || "#71717A";
 
   return (
     <div className="space-y-10" data-testid="costume-detail-page">
@@ -72,20 +80,47 @@ export default function CostumeDetail() {
         <ArrowLeft className="h-4 w-4 mr-1" /> Back
       </button>
 
-      {costume.is_flagged && (
+      {(costume.is_flagged || attachedFlags.length > 0) && (
         <div className="border border-[#EF4444] bg-[#FEF2F2] p-5" data-testid="detail-flag-banner">
           <div className="flex items-start gap-3">
             <Flag className="h-5 w-5 text-[#EF4444] mt-0.5 shrink-0" fill="currentColor" />
             <div className="flex-1">
               <div className="eyebrow text-[#B91C1C]">FLAGGED</div>
-              <p className="text-sm text-[#7F1D1D] mt-1 whitespace-pre-wrap">{costume.flag_reason || "No reason provided"}</p>
-              {costume.flagged_at && (
+              {attachedFlags.length > 0 ? (
+                <ul className="mt-2 space-y-2" data-testid="detail-flag-list">
+                  {attachedFlags.map((f) => {
+                    const cat = flagCatById[f.category_id];
+                    return (
+                      <li key={f.id} className="flex items-start gap-2 border border-[#FCA5A5] bg-white/60 px-3 py-2" data-testid={`detail-flag-${f.id}`}>
+                        <span className="w-2.5 h-2.5 mt-1.5 shrink-0" style={{ backgroundColor: cat?.color || "#EF4444" }} />
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium text-[#7F1D1D]">{cat?.name || "Unknown flag"}</div>
+                          {f.note && <p className="text-sm text-[#7F1D1D] whitespace-pre-wrap mt-0.5">{f.note}</p>}
+                          {f.created_at && (
+                            <p className="text-[10px] text-[#B91C1C] font-mono-label mt-0.5">
+                              {new Date(f.created_at).toLocaleString()}
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          data-testid={`detail-flag-remove-${f.id}`}
+                          onClick={() => handleUnflagOne(f.id)}
+                          className="text-xs text-[#B91C1C] hover:underline shrink-0"
+                        >
+                          Remove
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <p className="text-sm text-[#7F1D1D] mt-1 whitespace-pre-wrap">{costume.flag_reason || "No reason provided"}</p>
+              )}
+              {costume.flagged_at && attachedFlags.length === 0 && (
                 <p className="text-xs text-[#B91C1C] mt-1">Flagged on {new Date(costume.flagged_at).toLocaleString()}</p>
               )}
             </div>
-            <Button data-testid="detail-unflag-btn" variant="outline" onClick={handleUnflag} className="rounded-none border-[#EF4444] text-[#B91C1C] hover:bg-[#FEE2E2] h-9">
-              Remove flag
-            </Button>
           </div>
         </div>
       )}
@@ -105,7 +140,8 @@ export default function CostumeDetail() {
         </div>
         <div className="md:col-span-7 space-y-8">
           <div>
-            <div className="eyebrow">
+            <div className="eyebrow flex items-center gap-1.5">
+              <span className="w-2 h-2 shrink-0" style={{ backgroundColor: catColor }} data-testid="detail-cat-color" />
               {costume.category}
               {costume.subcategory ? <span className="text-[#09090B] normal-case tracking-normal"> · {costume.subcategory}</span> : null}
             </div>
@@ -131,6 +167,17 @@ export default function CostumeDetail() {
                   <Calendar className="h-4 w-4" />
                   <span>Origin: <span className="font-medium text-[#09090B]">{costume.origin_year}</span></span>
                 </div>
+              )}
+              {costume.buy_link && (
+                <a
+                  href={costume.buy_link}
+                  target="_blank"
+                  rel="noreferrer"
+                  data-testid="detail-buy-link"
+                  className="inline-flex items-center gap-1.5 border border-[#09090B] text-[#09090B] hover:bg-[#F4F4F5] px-3 py-1.5 text-xs"
+                >
+                  <ShoppingBag className="h-3.5 w-3.5" /> Link to buy <ExternalLink className="h-3 w-3" />
+                </a>
               )}
             </div>
 

@@ -10,6 +10,7 @@ import Settings from "@/pages/Settings";
 import Shows from "@/pages/Shows";
 import ShowDetail from "@/pages/ShowDetail";
 import GroupDetail from "@/pages/GroupDetail";
+import Flags from "@/pages/Flags";
 
 function App() {
   return (
@@ -24,6 +25,7 @@ function App() {
             <Route path="/shows" element={<Shows />} />
             <Route path="/shows/:id" element={<ShowDetail />} />
             <Route path="/group/:id" element={<GroupDetail />} />
+            <Route path="/flags" element={<Flags />} />
             <Route path="/settings" element={<Settings />} />
           </Route>
         </Routes>

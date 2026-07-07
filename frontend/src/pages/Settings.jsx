@@ -1,6 +1,6 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { api } from "@/lib/api";
-import { Plus, Trash2, Tag, Save, Ruler, ChevronDown, ChevronRight, X, Film, Upload, Image as ImageIcon } from "lucide-react";
+import { Plus, Trash2, Tag, Save, Ruler, ChevronDown, ChevronRight, X, Film, Upload, Image as ImageIcon, LinkIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,8 +31,11 @@ export default function Settings() {
   const [expandedYear, setExpandedYear] = useState({});
   const [locations, setLocations] = useState([]);
   const [newLocRoot, setNewLocRoot] = useState("");
-  const [settings, setSettings] = useState({ org_name: "", default_view: "grid", show_flag_banner: true });
+  const [settings, setSettings] = useState({ org_name: "", logo_image_id: null, default_view: "grid", show_flag_banner: true });
   const [savingSettings, setSavingSettings] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const logoInputRef = useRef(null);
+  const [editShowLink, setEditShowLink] = useState("");
 
   const fetchAll = async () => {
     const [c, s, sys, sh, locs] = await Promise.all([
@@ -140,6 +143,7 @@ export default function Settings() {
     setEditShowName(s.name);
     setEditShowYear(s.year != null ? String(s.year) : "");
     setEditShowImageId(s.image_id || null);
+    setEditShowLink(s.show_link || "");
   };
   const saveEditShow = async () => {
     const name = editShowName.trim();
@@ -147,7 +151,7 @@ export default function Settings() {
     if (!name) { toast.error("Name required"); return; }
     if (editShowYear.trim() && (isNaN(year) || year < 1800 || year > 2200)) { toast.error("Year invalid"); return; }
     try {
-      await api.put(`/shows/${editingShow}`, { name, year, image_id: editShowImageId });
+      await api.put(`/shows/${editingShow}`, { name, year, image_id: editShowImageId, show_link: editShowLink.trim() });
       setEditingShow(null);
       toast.success("Show updated");
       fetchAll();
@@ -217,6 +221,47 @@ export default function Settings() {
     setSavingSettings(false);
   };
 
+  const uploadLogo = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { toast.error("Please choose an image"); return; }
+    setUploadingLogo(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await api.post("/upload", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      const next = { ...settings, logo_image_id: r.data.image_id };
+      setSettings(next);
+      await api.put("/settings", next);
+      toast.success("Logo uploaded");
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Upload failed");
+    }
+    setUploadingLogo(false);
+    if (logoInputRef.current) logoInputRef.current.value = "";
+  };
+
+  const removeLogo = async () => {
+    const next = { ...settings, logo_image_id: "" };
+    setSettings({ ...settings, logo_image_id: null });
+    try {
+      await api.put("/settings", next);
+      toast.success("Logo removed");
+    } catch (err) {
+      toast.error("Failed to remove logo");
+    }
+  };
+
+  const saveCategoryColor = async (categoryId, color) => {
+    try {
+      await api.put(`/categories/${categoryId}`, { color });
+      setCategories((prev) => prev.map((c) => c.id === categoryId ? { ...c, color } : c));
+      toast.success("Color saved");
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to save color");
+    }
+  };
+
   return (
     <div className="space-y-12" data-testid="settings-page">
       <div className="space-y-2">
@@ -237,6 +282,52 @@ export default function Settings() {
           <div className="p-5">
             <Label className="eyebrow">ORGANIZATION NAME</Label>
             <Input data-testid="settings-org-name" value={settings.org_name || ""} onChange={(e) => setSettings({ ...settings, org_name: e.target.value })} placeholder="e.g. LUXE Show Choir" className="rounded-none border-[#E4E4E7] h-11 mt-2" />
+            <p className="text-xs text-[#A1A1AA] mt-1.5">Shown in the top-left corner of the app.</p>
+          </div>
+          <div className="p-5">
+            <Label className="eyebrow">ORGANIZATION LOGO</Label>
+            <div className="flex items-center gap-4 mt-2">
+              <div className="w-16 h-16 image-empty border border-[#E4E4E7] overflow-hidden flex items-center justify-center rounded-full shrink-0">
+                {settings.logo_image_id ? (
+                  <img
+                    src={`${process.env.REACT_APP_BACKEND_URL}/api/images/${settings.logo_image_id}`}
+                    alt="Logo"
+                    className="w-full h-full object-cover"
+                    data-testid="settings-logo-preview"
+                  />
+                ) : (
+                  <ImageIcon className="h-5 w-5 text-[#A1A1AA]" />
+                )}
+              </div>
+              <div className="flex-1 space-y-1">
+                <input ref={logoInputRef} type="file" accept="image/*" onChange={uploadLogo} className="hidden" data-testid="settings-logo-input" />
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    data-testid="settings-logo-upload-btn"
+                    onClick={() => logoInputRef.current?.click()}
+                    disabled={uploadingLogo}
+                    className="rounded-none border-[#09090B] h-10"
+                  >
+                    <Upload className="h-4 w-4 mr-1" />
+                    {uploadingLogo ? "Uploading…" : (settings.logo_image_id ? "Replace logo" : "Upload logo")}
+                  </Button>
+                  {settings.logo_image_id && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      data-testid="settings-logo-remove-btn"
+                      onClick={removeLogo}
+                      className="rounded-none h-10 text-[#EF4444]"
+                    >
+                      <X className="h-4 w-4 mr-1" /> Remove
+                    </Button>
+                  )}
+                </div>
+                <p className="text-xs text-[#A1A1AA]">Square PNG or JPG works best. Falls back to the first two letters of the org name.</p>
+              </div>
+            </div>
           </div>
           <div className="p-5">
             <Label className="eyebrow">DEFAULT INVENTORY VIEW</Label>
@@ -314,6 +405,12 @@ export default function Settings() {
                   <div className="flex items-center justify-between px-5 py-3 hover:bg-[#FAFAFA]">
                     <button type="button" data-testid={`toggle-cat-${c.id}`} onClick={() => setExpandedCat({ ...expandedCat, [c.id]: !isOpen })} className="flex items-center gap-3 flex-1 text-left">
                       {isOpen ? <ChevronDown className="h-4 w-4 text-[#71717A]" /> : <ChevronRight className="h-4 w-4 text-[#71717A]" />}
+                      <span
+                        className="w-3.5 h-3.5 border border-[#E4E4E7] shrink-0"
+                        style={{ backgroundColor: c.color || "#71717A" }}
+                        data-testid={`cat-color-swatch-${c.id}`}
+                        aria-label={`Color ${c.color || "#71717A"}`}
+                      />
                       <Tag className="h-4 w-4 text-[#71717A]" />
                       <span className="font-medium text-[#09090B]">{c.name}</span>
                       <span className="text-xs text-[#71717A] ml-2">{subs.length} subcategor{subs.length === 1 ? "y" : "ies"}</span>
@@ -323,17 +420,45 @@ export default function Settings() {
                     </button>
                   </div>
                   {isOpen && (
-                    <div className="bg-[#FAFAFA] border-t border-[#E4E4E7] p-4 space-y-3">
-                      <AddSubcategoryForm catId={c.id} onAdd={(name) => addSubcat(c.id, null, name)} />
-                      {/* Reuse LocationTree with subcategories */}
-                      {/* subcategories objects have {id, name, parent_id} but no path — LocationTree tolerates missing path */}
-                      <SubcategoryTree
-                        catId={c.id}
-                        nodes={subs}
-                        onAdd={(parentId, name) => addSubcat(c.id, parentId, name)}
-                        onRename={(id, name) => renameSubcat(c.id, id, name)}
-                        onDelete={(id, name, kids) => removeSubcat(c.id, id, name, kids)}
-                      />
+                    <div className="bg-[#FAFAFA] border-t border-[#E4E4E7] p-4 space-y-4">
+                      <div>
+                        <Label className="eyebrow">CATEGORY COLOR</Label>
+                        <div className="flex flex-wrap items-center gap-2 mt-2" data-testid={`cat-color-picker-${c.id}`}>
+                          {["#EF4444","#F97316","#F59E0B","#EAB308","#84CC16","#10B981","#14B8A6","#06B6D4","#3B82F6","#6366F1","#8B5CF6","#A855F7","#EC4899","#F43F5E","#71717A"].map((col) => (
+                            <button
+                              key={col}
+                              type="button"
+                              data-testid={`cat-color-${c.id}-${col.replace("#","")}`}
+                              onClick={() => saveCategoryColor(c.id, col)}
+                              className={`w-6 h-6 border-2 ${c.color === col ? "border-[#09090B] scale-110" : "border-transparent hover:border-[#71717A]"}`}
+                              style={{ backgroundColor: col }}
+                              aria-label={`Set color ${col}`}
+                            />
+                          ))}
+                          <input
+                            type="color"
+                            data-testid={`cat-color-picker-input-${c.id}`}
+                            value={c.color || "#71717A"}
+                            onChange={(e) => saveCategoryColor(c.id, e.target.value)}
+                            className="w-8 h-8 border border-[#E4E4E7] cursor-pointer p-0"
+                            aria-label="Custom color"
+                          />
+                        </div>
+                        <p className="text-xs text-[#A1A1AA] mt-1.5">Subcategories inherit lighter variations of this color automatically.</p>
+                      </div>
+                      <div>
+                        <Label className="eyebrow">SUBCATEGORIES</Label>
+                        <div className="mt-2 space-y-3">
+                          <AddSubcategoryForm catId={c.id} onAdd={(name) => addSubcat(c.id, null, name)} />
+                          <SubcategoryTree
+                            catId={c.id}
+                            nodes={subs}
+                            onAdd={(parentId, name) => addSubcat(c.id, parentId, name)}
+                            onRename={(id, name) => renameSubcat(c.id, id, name)}
+                            onDelete={(id, name, kids) => removeSubcat(c.id, id, name, kids)}
+                          />
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -389,6 +514,17 @@ export default function Settings() {
                             <Input data-testid={`edit-show-name-${s.id}`} value={editShowName} onChange={(e) => setEditShowName(e.target.value)} className="h-10 rounded-none border-[#E4E4E7]" />
                           </div>
                           <Input data-testid={`edit-show-year-${s.id}`} type="number" value={editShowYear} onChange={(e) => setEditShowYear(e.target.value)} className="h-10 rounded-none border-[#E4E4E7]" />
+                        </div>
+                        <div className="relative">
+                          <LinkIcon className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#71717A]" />
+                          <Input
+                            data-testid={`edit-show-link-${s.id}`}
+                            type="url"
+                            value={editShowLink}
+                            onChange={(e) => setEditShowLink(e.target.value)}
+                            placeholder="Link to watch (YouTube, Vimeo…)"
+                            className="pl-10 h-10 rounded-none border-[#E4E4E7]"
+                          />
                         </div>
                         <div className="flex items-start gap-3">
                           <div className="w-24 h-24 image-empty border border-[#E4E4E7] overflow-hidden shrink-0 flex items-center justify-center">

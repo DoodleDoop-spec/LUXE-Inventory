@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { api } from "@/lib/api";
-import { Plus, Search, LayoutGrid, List, X, MapPin, ChevronRight, Flag, StickyNote, SlidersHorizontal, ArrowUpDown, Calendar, Image as ImageIcon, Package } from "lucide-react";
+import { Plus, Search, LayoutGrid, List, X, MapPin, ChevronRight, Flag, StickyNote, SlidersHorizontal, ArrowUpDown, Calendar, Image as ImageIcon, Package, Tag as TagIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -57,6 +57,8 @@ export default function Inventory() {
   const [sortOpen, setSortOpen] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [dragging, setDragging] = useState(null); // costume being dragged
+  const [dragOverTarget, setDragOverTarget] = useState(null); // "cat:<name>" or "loc:<path>"
 
   useEffect(() => {
     (async () => {
@@ -151,6 +153,28 @@ export default function Inventory() {
   };
 
   const handleSaved = () => { setDialogOpen(false); fetchAll(); };
+
+  const handleDropOnCategory = async (categoryName) => {
+    if (!dragging || dragging.category === categoryName) return;
+    try {
+      await api.put(`/costumes/${dragging.id}`, { category: categoryName, subcategory: "" });
+      toast.success(`Moved "${dragging.name}" to ${categoryName}`);
+      fetchAll();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to move");
+    }
+  };
+
+  const handleDropOnLocation = async (locationPath) => {
+    if (!dragging || dragging.location === locationPath) return;
+    try {
+      await api.put(`/costumes/${dragging.id}`, { location: locationPath, sub_location: "" });
+      toast.success(`Moved "${dragging.name}" to ${locationPath}`);
+      fetchAll();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to move");
+    }
+  };
 
   const filterCount = useMemo(() => {
     return (category !== ALL ? 1 : 0) + (subcategory !== ALL ? 1 : 0)
@@ -427,11 +451,100 @@ export default function Inventory() {
       ) : view === "grid" ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-px bg-[#E4E4E7] border border-[#E4E4E7]">
           {costumes.map((c) => (
-            <CostumeCard key={c.id} costume={c} onEdit={handleEdit} onDelete={handleDelete} sizingSystems={sizingSystems} showsById={showsById} />
+            <CostumeCard
+              key={c.id}
+              costume={c}
+              onEdit={handleEdit}
+              onDelete={handleDelete}
+              sizingSystems={sizingSystems}
+              showsById={showsById}
+              categories={categories}
+              onDragStart={() => setDragging(c)}
+              onDragEnd={() => { setDragging(null); setDragOverTarget(null); }}
+              isDragging={dragging?.id === c.id}
+            />
           ))}
         </div>
       ) : (
-        <CostumeTable costumes={costumes} onEdit={handleEdit} onDelete={handleDelete} showsById={showsById} />
+        <CostumeTable costumes={costumes} onEdit={handleEdit} onDelete={handleDelete} showsById={showsById} categories={categories} />
+      )}
+
+      {/* Drag & drop dock */}
+      {dragging && (
+        <div className="fixed bottom-0 left-0 right-0 z-40 bg-white border-t-2 border-[#09090B] shadow-2xl" data-testid="dnd-dock">
+          <div className="max-w-[1400px] mx-auto px-6 md:px-10 py-4 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm">
+                <span className="eyebrow">MOVING</span>{" "}
+                <span className="font-semibold text-[#09090B]">{dragging.name}</span>{" "}
+                <span className="text-[#71717A]">— drop on a category or storage location</span>
+              </div>
+              <button
+                type="button"
+                data-testid="dnd-cancel"
+                onClick={() => { setDragging(null); setDragOverTarget(null); }}
+                className="text-xs text-[#71717A] hover:text-[#09090B] px-2 py-1 border border-[#E4E4E7]"
+              >
+                Cancel
+              </button>
+            </div>
+            <div className="grid md:grid-cols-2 gap-3">
+              <div>
+                <div className="eyebrow mb-2 flex items-center gap-1.5"><TagIcon className="h-3 w-3" /> CATEGORIES</div>
+                <div className="flex flex-wrap gap-2">
+                  {categories.map((cat) => {
+                    const isOver = dragOverTarget === `cat:${cat.name}`;
+                    const isCurrent = dragging.category === cat.name;
+                    return (
+                      <div
+                        key={cat.id}
+                        data-testid={`dnd-drop-cat-${cat.id}`}
+                        onDragOver={(e) => { e.preventDefault(); setDragOverTarget(`cat:${cat.name}`); }}
+                        onDragLeave={() => setDragOverTarget(null)}
+                        onDrop={(e) => { e.preventDefault(); handleDropOnCategory(cat.name); setDragOverTarget(null); }}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 border text-xs cursor-pointer transition-all ${
+                          isOver ? "border-[#09090B] bg-[#09090B] text-white scale-105" :
+                          isCurrent ? "border-[#E4E4E7] text-[#A1A1AA] bg-[#FAFAFA]" :
+                          "border-[#E4E4E7] text-[#09090B] hover:border-[#09090B]"
+                        }`}
+                      >
+                        <span className="w-2.5 h-2.5" style={{ backgroundColor: cat.color || "#71717A" }} />
+                        {cat.name}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              <div>
+                <div className="eyebrow mb-2 flex items-center gap-1.5"><MapPin className="h-3 w-3" /> STORAGE LOCATIONS</div>
+                <div className="flex flex-wrap gap-2 max-h-24 overflow-y-auto">
+                  {locations.map((l) => {
+                    const isOver = dragOverTarget === `loc:${l.path}`;
+                    const isCurrent = dragging.location === l.path;
+                    return (
+                      <div
+                        key={l.id}
+                        data-testid={`dnd-drop-loc-${l.id}`}
+                        onDragOver={(e) => { e.preventDefault(); setDragOverTarget(`loc:${l.path}`); }}
+                        onDragLeave={() => setDragOverTarget(null)}
+                        onDrop={(e) => { e.preventDefault(); handleDropOnLocation(l.path); setDragOverTarget(null); }}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 border text-xs cursor-pointer transition-all ${
+                          isOver ? "border-[#09090B] bg-[#09090B] text-white scale-105" :
+                          isCurrent ? "border-[#E4E4E7] text-[#A1A1AA] bg-[#FAFAFA]" :
+                          "border-[#E4E4E7] text-[#09090B] hover:border-[#09090B]"
+                        }`}
+                        style={{ paddingLeft: `${12 + (l.depth || 0) * 8}px` }}
+                      >
+                        <MapPin className="h-3 w-3" />
+                        {l.name}{l.depth > 0 ? <span className="text-[#A1A1AA]"> · {l.path}</span> : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       <CostumeFormDialog
@@ -449,13 +562,21 @@ export default function Inventory() {
   );
 }
 
-function CostumeCard({ costume, onEdit, onDelete, sizingSystems, showsById }) {
+function CostumeCard({ costume, onEdit, onDelete, sizingSystems, showsById, categories, onDragStart, onDragEnd, isDragging }) {
   const sys = sizingSystems.find((s) => s.name === (costume.sizing_system || "Letter"));
   const sizeKeys = sys?.sizes || Object.keys(costume.sizes || {});
   const anySizeNote = sizeKeys.some((s) => (costume.size_notes?.[s] || "").trim());
   const originShow = costume.original_show_id ? showsById?.[costume.original_show_id] : null;
+  const cat = (categories || []).find((c) => c.name === costume.category);
+  const catColor = cat?.color || "#71717A";
   return (
-    <div className="bg-white p-5 group hover:bg-[#FAFAFA] transition-colors flex flex-col" data-testid={`costume-card-${costume.id}`}>
+    <div
+      className={`bg-white p-5 group hover:bg-[#FAFAFA] transition-colors flex flex-col ${isDragging ? "opacity-50" : ""}`}
+      data-testid={`costume-card-${costume.id}`}
+      draggable
+      onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; onDragStart?.(); }}
+      onDragEnd={() => onDragEnd?.()}
+    >
       <Link to={`/costume/${costume.id}`} className="block">
         <div className="aspect-[4/5] image-empty overflow-hidden mb-4 relative">
           {costume.image_id ? (
@@ -481,7 +602,8 @@ function CostumeCard({ costume, onEdit, onDelete, sizingSystems, showsById }) {
       </Link>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <div className="eyebrow truncate">
+          <div className="eyebrow truncate flex items-center gap-1.5">
+            <span className="w-2 h-2 shrink-0" style={{ backgroundColor: catColor }} data-testid={`card-cat-color-${costume.id}`} />
             {costume.category}
             {costume.subcategory ? <span className="text-[#09090B] normal-case tracking-normal"> · {costume.subcategory}</span> : null}
           </div>
@@ -565,7 +687,12 @@ function CostumeCard({ costume, onEdit, onDelete, sizingSystems, showsById }) {
   );
 }
 
-function CostumeTable({ costumes, onEdit, onDelete, showsById }) {
+function CostumeTable({ costumes, onEdit, onDelete, showsById, categories }) {
+  const catById = useMemo(() => {
+    const m = {};
+    for (const c of (categories || [])) m[c.name] = c;
+    return m;
+  }, [categories]);
   return (
     <div className="border border-[#E4E4E7] overflow-x-auto" data-testid="costume-table">
       <table className="w-full text-sm">
@@ -607,7 +734,10 @@ function CostumeTable({ costumes, onEdit, onDelete, showsById }) {
                   </div>
                 </td>
                 <td className="px-4 py-3 text-[#52525B]">
-                  {c.category}{c.subcategory ? ` · ${c.subcategory}` : ""}
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="w-2 h-2 shrink-0" style={{ backgroundColor: catById[c.category]?.color || "#71717A" }} />
+                    {c.category}{c.subcategory ? ` · ${c.subcategory}` : ""}
+                  </span>
                 </td>
                 <td className="px-4 py-3 text-[#52525B]">
                   {c.location}{c.sub_location ? ` · ${c.sub_location}` : ""}

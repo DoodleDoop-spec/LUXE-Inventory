@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 8 (flags system + org branding + color-coded categories + buy/show links + DnD) tested end-to-end. Found and FIXED a critical Pydantic model bug: ShowPayload and Show did not declare show_link, causing POST /api/shows and PUT /api/shows/{id} to 500 whenever the client sent show_link (identical pattern to Iter-7 group_id bug). After the fix all 27 backend pytest tests pass (7 new TestIteration8 tests + 20 legacy). Frontend key data-testids verified live via Playwright: brand-org-name + brand-logo-fallback show custom org name and initials; /flags page renders with 3 seeded flag categories (On Loan / Needs Repair / In Cleaning) and add-flag works; Shows page shows-add-btn opens show-form-dialog and creates a show; ShowDetail show-add-costumes-btn opens show-picker-dialog with items and attach button; CostumeFormDialog exposes form-buy-link, form-flags-section, form-flag-add-select; CostumeDetail renders detail-flag-banner, detail-flag-{id}, and detail-cat-color; Inventory grid cards are draggable=true and, upon dragstart, dnd-dock reveals 10 dnd-drop-cat-* and 9 dnd-drop-loc-* drop targets; Settings has settings-logo-upload-btn and cat-color-picker-{id} shown after expanding a category row.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Flags page", "issues": ["Existing legacy costumes flagged via is_flagged/flag_reason (before flags array introduced) do NOT appear under any Flag Category section (e.g. 'Black Trenchcoat' shown as flagged on Dashboard but 'On Loan' section shows 0 costumes). Non-blocking but consider a one-time data migration to attach an 'On Loan' flag to legacy flagged rows."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "REVIEW the fix: added Optional show_link field to Show and ShowPayload models in /app/backend/server.py (was causing 500 on show create/update).",
+    "Optional: one-time migration to convert legacy is_flagged/flag_reason costumes to a flags-array entry so they appear in the /flags page category buckets."
+  ],
+  "critical_code_review_comments": [
+    "Recurring bug pattern (3rd occurrence — iter 7 group_id, iter 8 show_link, and buy_link avoided it): whenever a new field is added to a resource, the developer must add it to BOTH the response model (Show/Costume) AND the payload model (ShowPayload/CostumeBase/CostumeUpdate). Consider generating request models from a shared base or adding a startup schema sanity check.",
+    "server.py is now 1410 lines. Split into routers/ (costumes, groups, categories, flag_categories, shows, settings, uploads). Iteration 8 added ~250 lines and CRUD for flag categories & attaches.",
+    "/api/flag-categories delete cascade uses a two-step approach ($pull then find $size:0). Correct but not atomic. At scale, consider a single aggregation pipeline update.",
+    "/api/inventory continues its N+1 query pattern (one costumes.find per group). Fine at current scale.",
+    "Category color update accepts arbitrary string — no hex validation. Not a blocker but easy to add (^#[0-9A-Fa-f]{6}$)."
+  ],
+  "updated_files": [
+    "/app/backend/server.py (added show_link: Optional[str] to Show and ShowPayload)",
+    "/app/backend/tests/backend_test.py (added TestIteration8 class: 7 tests covering settings/org, flag CRUD + cascade, multi-flag costume, buy_link, category color + rename cascade, show_link)"
+  ],
+  "success_rate": {"backend": "100% (27/27)", "frontend": "100% of tested testids present and interactive"},
+  "test_credentials": "none required",
+  "seed_data_creation": "All test entities use TEST_* prefix and are cleaned up after each test. Manually cleaned up one leftover TEST_UI_FLAG_XYZ + TEST_UI_SHOW_ABC from Playwright runs; re-added seeded 'On Loan' flag category after a wrong-target UI delete during exploration.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 8 shipped: dynamic org branding (settings.org_name/logo_image_id), /flag-categories CRUD with cascade, multi-flag costumes (POST/PUT/DELETE /api/costumes/{id}/flags), Costume.buy_link, Show.show_link, per-Category color, Inventory drag & drop (dnd-dock revealed on dragstart). Backend needed one fix: show_link added to Show + ShowPayload. All 27 pytest tests pass. Frontend testids verified: brand-*, flags-page, new-flag-*, edit-flag-btn-*, delete-flag-btn-*, shows-add-btn, show-form-dialog, show-add-costumes-btn, show-picker-*, form-buy-link, form-flags-section, form-flag-add-select, form-flag-note-*, detail-flag-banner, detail-flag-*, detail-cat-color, dnd-dock, dnd-drop-cat-*, dnd-drop-loc-*, settings-logo-upload-btn, cat-color-picker-*.",
+  "rca of the issue": "POST /api/shows returned 500 with AttributeError: 'ShowPayload' object has no attribute 'show_link'. Handler at server.py:1054 referenced payload.show_link but the Pydantic ShowPayload class did not declare it. Same class of bug as iter-7 CostumeBase.group_id. Root cause: developer added show_link to handler + Show response class + FE payload but forgot the request model. Fix applied: added show_link: Optional[str] = '' to both Show and ShowPayload. Verified via test_show_link_persists (POST → GET → PUT → GET round-trip)."
+}
