@@ -30,6 +30,21 @@ A proprietary internal tracking system for costumes/accessories with location tr
 - Wording sweep to "costumes / accessories".
 - Drag & drop on Inventory.
 
+### Iteration 11 — Jul 2026 (this session)
+- **Costume form bug fix**: Reset useEffect now depends only on `[open, editing?.id]` — prop refetches (locations/categories/shows after inline creation) no longer wipe user input. Inline subcategory creation auto-selects the new sub without losing other fields.
+- **Sorting system is optional**: New "— None (single total) —" option. When selected, the sizes grid hides and a single TOTAL QUANTITY input replaces it. Persisted via `total_quantity_override` on the API.
+- **In-page confirm dialogs**: All `window.confirm` calls replaced by a promise-based `useConfirm()` powered by shadcn AlertDialog. Reusable across Inventory / Costume detail / Show detail / Settings / Flags.
+- **Current show on in-use costumes** (max 2 active): When toggled to in-use, a dropdown appears to pick one of the costume's attached shows as the current one. Backend enforces a cap of 2 distinct current shows (`_enforce_current_show_cap`). Shows with any in-use costume attached now show a green blinking "LIVE" badge on the Shows page.
+- **Edit / delete show**: `ShowDetail` gets an "Edit show" button that opens an in-place dialog (name, year, cover photo, watch link, notes) and a "Delete" button (guarded by the confirm dialog + backend "in use" check).
+- **Prominent "remove costume from show" button**: The X on each costume card in a show is now always visible (was hover-only).
+- **Settings tabs**: Reorganized into 6 tabs — General, Storage, Categories, Sorting Systems, Shows, Maintenance.
+- **Fixed show_flag_banner**: Dashboard now honors the setting (previously the flag banner always showed).
+- **3-way in-use visibility**: Settings > General has "Show everything / Hide markers only / Don't spoil the surprise!" toggle. `hide_all` shows a locked banner with "Don't spoil the surprise! 🤫" instead of the in-use list; `hide_marker` keeps the section but drops the green "IN USE" tags on cards.
+- **Pinned costumes**: New `pinned: bool` field on costumes; toggle in the form. Dashboard shows pinned first (up to 8), falls back to "Most recently used" when nothing is pinned. Pinned items show a yellow star badge.
+- **Live org name + logo**: New `SettingsContext` broadcasts settings; Layout and Dashboard consume it. Saves from the Settings page propagate immediately without a page refresh.
+- **Inventory category accordion**: Grid view now groups costumes by category into collapsible sections (chevron, category color swatch, piece/unit count). Each section can be collapsed independently.
+- **Migration**: startup migration keeps working (rename sizing→sorting, backfill shows). Any legacy costume that had sorting_system="Letter" but no chosen sizes still functions.
+
 ### Iteration 10 — Jul 2026 (this session)
 - **Category ↔ Group merge (backend layer)**: Categories and Subcategories now carry `image_id`, `location`, `sub_location`, `notes`, `keywords`, `creator`. API endpoints (`PUT /categories/{id}`, `POST/PUT /categories/{id}/subcategories`) accept and persist these. Subcategories can be nested and each can act like a "group" (image + location + notes) — Q1c.
 - **Costume shows revamp**: Removed `original_show_id`; costumes now carry `shows: [{show_id, timestamp}]` with per-costume timestamps. Origin year is derived as MIN(show.year) across attached shows. Legacy fields are read but no longer written; a startup migration back-fills the new field from legacy data.
