@@ -101,3 +101,223 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: |
+  Iteration 10: three connected feature changes to the LUXE Inventory app.
+  1. Merge categories + costume groups: categories now act like groups (image, general location, notes, keywords) and subcategories are nested "group-like" items. Retain group functionality on Category and Subcategory.
+  2. Costume creation changes:
+     - Remove "original show"; costume just has a list of shows it appears in.
+     - Each per-costume show entry has its own timestamp; the show video timestamp field has been removed from the show, and each costume can provide/edit the show's link inline.
+     - Rename "sizing system" → "sorting system" (same concept, generalized). Allow creating new sorting systems inline from the costume form.
+  3. Dashboard: 8 clickable tiles total. Included: Total Pieces, Total Quantity, Equipment (placeholder → /equipment page), In Use, Categories, Storage Locations, Shows, Flagged. All tiles route to their respective sections. Added Equipment tab in main navigation between Inventory and Shows.
+
+backend:
+  - task: "Costume model: replace original_show_id/additional_show_ids with per-costume shows list (with timestamps)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Added CostumeShowEntry model. CostumeBase now has `shows: List[CostumeShowEntry]` and no `original_show_id`/`additional_show_ids`. CostumeUpdate accepts `shows`. On create/update, origin_year is computed as MIN(show.year) across the costume's shows. On startup, existing costumes without a `shows` field are migrated from legacy `original_show_id` + `additional_show_ids`. GET /costumes filter by `show_id` matches both new `shows.show_id` and legacy fields.
+        - working: true
+          agent: "testing"
+          comment: |
+            TESTED: Created 2 shows (2020, 2024). POST costume with shows list containing both shows with timestamps. Verified: (1) shows list preserved with correct timestamps, (2) origin_year=2020 (MIN of years), (3) PUT to update shows list to only 2024 show → origin_year updated to 2024, (4) GET /costumes?show_id filter correctly includes costume, (5) Legacy field sizing_system correctly updates sorting_system. All assertions passed.
+
+  - task: "Rename Costume.sizing_system → sorting_system; add /sorting-systems endpoints as aliases"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Costume now stores `sorting_system`. Payload accepts both `sorting_system` and legacy `sizing_system`. New `/api/sorting-systems` GET/POST/PUT/DELETE endpoints delegate to the existing sizing_systems collection. Startup migration copies existing `sizing_system` value → `sorting_system` for docs missing the new field. Delete guard checks both fields.
+        - working: true
+          agent: "testing"
+          comment: |
+            TESTED: (1) GET /sorting-systems returns 4 default systems (Letter, Number (Even), Tall, Petite), (2) POST new system "Colors" with sizes [Red, Green, Blue] → created successfully, (3) PUT to update sizes → updated to 4 sizes, (4) DELETE system → deleted successfully, (5) Cross-check: /sorting-systems and /sizing-systems return identical lists. All CRUD operations working correctly.
+
+  - task: "Show model: remove link_timestamp; migration unsets it"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Show and ShowPayload no longer carry `link_timestamp`. On startup, `link_timestamp` is $unset from all show docs. Show create/update ignore the field. delete_show also blocks removal if any costume references the show via the new `shows.show_id` list.
+        - working: true
+          agent: "testing"
+          comment: |
+            TESTED: (1) POST show with link_timestamp field → field ignored, not present in response, (2) PUT show_link → updated successfully, link_timestamp still not in response, (3) DELETE show while costume references it via new shows list → correctly returns 409 conflict. All behaviors correct.
+
+  - task: "Category enrichment: image_id, location, sub_location, notes, keywords, creator on Category and Subcategory"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            CategoryUpdate now accepts image_id, location, sub_location, notes, keywords, creator. SubcategoryPayload/SubcategoryRename accept image_id, location, sub_location, notes, keywords. GET /categories fills defaults for these fields. _normalize_subcategories preserves them.
+        - working: true
+          agent: "testing"
+          comment: |
+            TESTED: (1) POST category "Earrings", (2) PUT with enrichment fields (location=Vault, sub_location=Drawer 3, notes, keywords, creator=Alice) → all fields persisted correctly, (3) POST subcategory "Studs" with location=Vault, notes=Post backs → created with enrichment fields, (4) PUT subcategory with notes only (no name) → notes updated, name unchanged, (5) GET categories → all enrichment fields persisted. All operations working correctly.
+
+  - task: "Stats endpoint: expose total_shows, total_locations, equipment_count"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            /api/stats returns total_shows (from shows collection), total_locations (from locations collection), equipment_count (from equipment collection — currently 0, placeholder for future).
+        - working: true
+          agent: "testing"
+          comment: |
+            TESTED: GET /api/stats returns all required fields: total_shows (0), total_locations (6 seeded), equipment_count (0). All fields are integers as expected. Working correctly.
+
+frontend:
+  - task: "Dashboard: 8 clickable tiles routing to their sections"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/pages/Dashboard.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Dashboard grid now shows 8 tiles: Total Pieces, Total Quantity, Equipment, In Use, Categories, Storage Locations, Shows, Flagged. Each tile is a <button> that navigates to /inventory, /equipment, /settings, /locations, /shows, or /flags accordingly. Hover states show "VIEW →" indicator.
+
+  - task: "Layout: Equipment nav tab; new /equipment stub page"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/components/Layout.jsx, frontend/src/pages/Equipment.jsx, frontend/src/App.js"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Added Equipment nav item using Wrench icon between Inventory and Shows. Mobile nav grid changed to 4 cols. New /equipment route renders a "Coming soon" placeholder card.
+
+  - task: "CostumeFormDialog: remove Original Show; add per-costume shows list with per-entry timestamp and inline show link editing; rename Sizing → Sorting; inline create sorting system"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/components/CostumeFormDialog.jsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Removed originalShowId + additionalShowIds state; introduced costumeShows: [{show_id, timestamp}] and showLinkEdits map. UI shows a list of attached shows each with a video link input (pre-filled from show.show_link, saved back to the show on submit) and a timestamp input. "Add a show" dropdown lets user pick or create new. Label changed to "SORTING SYSTEM". Added inline "+ New sorting system…" flow that POSTs to /sorting-systems and selects the new system.
+
+  - task: "Shows.jsx: remove link_timestamp field from form; ShowDetail.jsx: watch link no longer includes timestamp; use per-costume shows list for attach/detach"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/pages/Shows.jsx, frontend/src/pages/ShowDetail.jsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Shows form no longer has a timestamp field. Show video "Watch this show" link no longer appends timestamp. countsByShow, originals, additionals, attachSelected, detachCostume rewritten to use new `shows` field (with legacy fallback).
+
+  - task: "CostumeDetail.jsx: render new shows list with per-entry timestamp + watch link"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/pages/CostumeDetail.jsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            Detail page collects showEntries from costume.shows (falls back to legacy fields) and displays them each with an optional per-costume timestamp badge + a "Watch @ moment" link built by buildTimestampedUrl.
+
+  - task: "Inventory.jsx: hide New Group button and Groups strip; use sorting_system with legacy fallback"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/pages/Inventory.jsx"
+    stuck_count: 0
+    priority: "low"
+    needs_retesting: false
+    status_history:
+        - working: "NA"
+          agent: "main"
+          comment: |
+            The "New Group" button was removed and the Groups strip is now gated to never render (kept the code path for a possible rollback). CostumeCard/CostumeTable read costume.sorting_system with fallback to costume.sizing_system.
+
+metadata:
+  created_by: "main_agent"
+  version: "1.0"
+  test_sequence: 1
+  run_ui: false
+
+test_plan:
+  current_focus:
+    - "Costume model: replace original_show_id/additional_show_ids with per-costume shows list (with timestamps)"
+    - "Rename Costume.sizing_system → sorting_system; add /sorting-systems endpoints as aliases"
+    - "Show model: remove link_timestamp; migration unsets it"
+    - "Category enrichment: image_id, location, sub_location, notes, keywords, creator on Category and Subcategory"
+    - "Stats endpoint: expose total_shows, total_locations, equipment_count"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+    - agent: "main"
+      message: |
+        Iteration 10 backend + frontend changes are in. Please verify backend endpoints end-to-end:
+
+        1. GET /api/stats returns the new fields total_shows, total_locations, equipment_count.
+        2. GET /api/sorting-systems, POST /api/sorting-systems, PUT /api/sorting-systems/{id}, DELETE /api/sorting-systems/{id} — all should behave identically to /api/sizing-systems (they share the same underlying collection).
+        3. POST /api/costumes accepts new `shows: [{show_id, timestamp}]` list; origin_year is set to MIN(show.year) among attached shows.
+        4. PUT /api/costumes/{id} with `shows` updates the list and re-computes origin_year. Passing `sorting_system` overrides the field; passing legacy `sizing_system` should also work (aliased).
+        5. GET /api/costumes?show_id=X should match costumes referencing X via new `shows` list AND via legacy original_show_id/additional_show_ids.
+        6. POST /api/shows / PUT /api/shows/{id}: `link_timestamp` no longer required; endpoints ignore it if sent.
+        7. DELETE /api/shows/{id}: refuse deletion if any costume references the show via new `shows` list.
+        8. Category endpoints (POST /api/categories, PUT /api/categories/{id}, POST subcategories, PUT subcategories) accept and persist image_id, location, sub_location, notes, keywords, creator (rename-only calls to subcategories should also still work).
+
+        No prior test credentials. No auth. Please treat any 4xx/5xx as failure. If a legacy costume already exists in the DB (there shouldn't be any yet — empty DB), the startup migration should populate `shows` from legacy fields.
+    - agent: "testing"
+      message: |
+        ✅ ALL BACKEND TESTS PASSED (5/5)
+        
+        Completed comprehensive end-to-end testing of all Iteration 10 backend features:
+        
+        1. ✅ Stats endpoint: total_shows, total_locations, equipment_count all present and correct (0, 6, 0 in fresh DB)
+        2. ✅ Sorting systems: Full CRUD working, cross-check with sizing-systems confirmed identical
+        3. ✅ Costumes with shows list: Per-costume shows with timestamps working, origin_year computed as MIN(show.year), updates recalculate correctly, show_id filter working, legacy sizing_system field correctly updates sorting_system
+        4. ✅ Shows: link_timestamp field removed and ignored on POST/PUT, show_link updates working, DELETE with costume reference correctly returns 409
+        5. ✅ Categories enrichment: All new fields (image_id, location, sub_location, notes, keywords, creator) working on both Category and Subcategory, partial updates (notes-only) working correctly
+        
+        All backend APIs are functioning correctly. No errors or failures detected.

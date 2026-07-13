@@ -114,6 +114,12 @@ DEFAULT_SIZING_SYSTEMS = [
 ]
 
 
+class CostumeShowEntry(BaseModel):
+    """A single show a costume appears in, with an optional per-costume timestamp."""
+    show_id: str
+    timestamp: Optional[str] = ""
+
+
 class CostumeFlag(BaseModel):
     id: str
     category_id: str
@@ -129,14 +135,13 @@ class CostumeBase(BaseModel):
     sub_location: Optional[str] = ""
     notes: Optional[str] = ""
     note_image_ids: List[str] = Field(default_factory=list)
-    sizing_system: Optional[str] = "Letter"
+    sorting_system: Optional[str] = "Letter"
     sizes: Dict[str, int] = Field(default_factory=dict)
     size_notes: Dict[str, str] = Field(default_factory=dict)
     keywords: List[str] = Field(default_factory=list)
     creator: Optional[str] = ""
     buy_link: Optional[str] = ""
-    original_show_id: Optional[str] = None
-    additional_show_ids: List[str] = Field(default_factory=list)
+    shows: List[CostumeShowEntry] = Field(default_factory=list)
     group_id: Optional[str] = None
     variant_label: Optional[str] = ""
     in_use: Optional[bool] = False
@@ -148,6 +153,8 @@ class CostumeCreate(CostumeBase):
     is_flagged: Optional[bool] = False
     flag_reason: Optional[str] = ""
     flags: Optional[List[Dict]] = None
+    # Legacy field names — accepted for backward compatibility
+    sizing_system: Optional[str] = None
 
 
 class CostumeUpdate(BaseModel):
@@ -158,14 +165,14 @@ class CostumeUpdate(BaseModel):
     sub_location: Optional[str] = None
     notes: Optional[str] = None
     note_image_ids: Optional[List[str]] = None
-    sizing_system: Optional[str] = None
+    sorting_system: Optional[str] = None
+    sizing_system: Optional[str] = None  # legacy alias
     sizes: Optional[Dict[str, int]] = None
     size_notes: Optional[Dict[str, str]] = None
     keywords: Optional[List[str]] = None
     creator: Optional[str] = None
     buy_link: Optional[str] = None
-    original_show_id: Optional[str] = None
-    additional_show_ids: Optional[List[str]] = None
+    shows: Optional[List[CostumeShowEntry]] = None
     image_id: Optional[str] = None
     is_flagged: Optional[bool] = None
     flag_reason: Optional[str] = None
@@ -214,14 +221,13 @@ class Costume(BaseModel):
     sub_location: str = ""
     notes: str = ""
     note_image_ids: List[str] = Field(default_factory=list)
-    sizing_system: str = "Letter"
+    sorting_system: str = "Letter"
     sizes: Dict[str, int]
     size_notes: Dict[str, str] = Field(default_factory=dict)
     keywords: List[str] = Field(default_factory=list)
     creator: str = ""
     buy_link: str = ""
-    original_show_id: Optional[str] = None
-    additional_show_ids: List[str] = Field(default_factory=list)
+    shows: List[CostumeShowEntry] = Field(default_factory=list)
     origin_year: Optional[int] = None
     total_quantity: int
     image_id: Optional[str] = None
@@ -278,7 +284,6 @@ class Show(BaseModel):
     image_id: Optional[str] = None
     notes: Optional[str] = ""
     show_link: Optional[str] = ""
-    link_timestamp: Optional[str] = ""
     created_at: str
 
 
@@ -288,16 +293,25 @@ class ShowPayload(BaseModel):
     image_id: Optional[str] = None
     notes: Optional[str] = ""
     show_link: Optional[str] = ""
-    link_timestamp: Optional[str] = ""
 
 
 class SubcategoryPayload(BaseModel):
     name: str
     parent_id: Optional[str] = None
+    image_id: Optional[str] = None
+    location: Optional[str] = None
+    sub_location: Optional[str] = None
+    notes: Optional[str] = None
+    keywords: Optional[List[str]] = None
 
 
 class SubcategoryRename(BaseModel):
-    name: str
+    name: Optional[str] = None
+    image_id: Optional[str] = None
+    location: Optional[str] = None
+    sub_location: Optional[str] = None
+    notes: Optional[str] = None
+    keywords: Optional[List[str]] = None
 
 
 class SizingSystem(BaseModel):
@@ -314,16 +328,30 @@ class SizingSystemPayload(BaseModel):
 
 
 def _normalize_subcategories(subs):
-    """Migrate flat list of strings → list of dicts with id/name/parent_id."""
+    """Migrate flat list of strings → list of dicts with id/name/parent_id and group-like fields."""
     out = []
     for s in subs or []:
         if isinstance(s, str):
-            out.append({"id": str(uuid.uuid4()), "name": s, "parent_id": None})
+            out.append({
+                "id": str(uuid.uuid4()),
+                "name": s,
+                "parent_id": None,
+                "image_id": None,
+                "location": "",
+                "sub_location": "",
+                "notes": "",
+                "keywords": [],
+            })
         elif isinstance(s, dict):
             out.append({
                 "id": s.get("id") or str(uuid.uuid4()),
                 "name": s.get("name", ""),
                 "parent_id": s.get("parent_id"),
+                "image_id": s.get("image_id"),
+                "location": s.get("location", "") or "",
+                "sub_location": s.get("sub_location", "") or "",
+                "notes": s.get("notes", "") or "",
+                "keywords": list(s.get("keywords") or []),
             })
     return out
 
@@ -380,6 +408,9 @@ async def get_stats():
     total_items = sum(c.get("total_quantity", 0) for c in costumes)
     categories = sorted({c.get("category", "") for c in costumes if c.get("category")})
     locations_in_use = sorted({c.get("location", "") for c in costumes if c.get("location")})
+    total_shows = await db.shows.count_documents({})
+    total_locations = await db.locations.count_documents({})
+    equipment_count = await db.equipment.count_documents({})
     return {
         "total_costumes": total_costumes,
         "total_items": total_items,
@@ -388,6 +419,9 @@ async def get_stats():
         "locations_in_use": locations_in_use,
         "flagged_count": sum(1 for c in costumes if c.get("is_flagged")),
         "in_use_count": sum(1 for c in costumes if c.get("in_use")),
+        "total_shows": total_shows,
+        "total_locations": total_locations,
+        "equipment_count": equipment_count,
     }
 
 
@@ -427,12 +461,17 @@ async def list_costumes(
     if size:
         query[f"sizes.{size}"] = {"$gt": 0}
     if sizing_system:
-        query["sizing_system"] = sizing_system
+        # Accept both legacy 'sizing_system' and new 'sorting_system' fields for filtering
+        query["$or"] = query.get("$or", []) + [
+            {"sorting_system": sizing_system},
+            {"sizing_system": sizing_system},
+        ]
     if year is not None:
         query["origin_year"] = year
     if show_id:
         query["$and"] = query.get("$and", []) + [{
             "$or": [
+                {"shows.show_id": show_id},
                 {"original_show_id": show_id},
                 {"additional_show_ids": show_id},
             ]
@@ -468,14 +507,40 @@ async def get_costume(costume_id: str):
     return doc
 
 
-async def _resolve_origin_year(original_show_id: Optional[str]) -> Optional[int]:
-    if not original_show_id:
+async def _resolve_origin_year_from_shows(shows: List) -> Optional[int]:
+    """Return the earliest year across a costume's shows list, if any."""
+    if not shows:
         return None
-    show = await db.shows.find_one({"id": original_show_id})
-    if not show:
+    show_ids = []
+    for s in shows:
+        if isinstance(s, dict):
+            sid = s.get("show_id")
+        else:
+            sid = getattr(s, "show_id", None)
+        if sid:
+            show_ids.append(sid)
+    if not show_ids:
         return None
-    y = show.get("year")
-    return int(y) if y is not None else None
+    docs = await db.shows.find({"id": {"$in": show_ids}}, {"_id": 0, "year": 1}).to_list(200)
+    years = [int(d["year"]) for d in docs if d.get("year") is not None]
+    return min(years) if years else None
+
+
+def _normalize_costume_shows(raw) -> List[Dict]:
+    out = []
+    seen = set()
+    for s in raw or []:
+        if isinstance(s, dict):
+            sid = s.get("show_id")
+            ts = (s.get("timestamp") or "").strip()
+        else:
+            sid = getattr(s, "show_id", None)
+            ts = (getattr(s, "timestamp", "") or "").strip()
+        if not sid or sid in seen:
+            continue
+        seen.add(sid)
+        out.append({"show_id": sid, "timestamp": ts})
+    return out
 
 
 @api_router.post("/costumes", response_model=Costume)
@@ -484,7 +549,10 @@ async def create_costume(payload: CostumeCreate):
     sizes = {str(k): int(v or 0) for k, v in (payload.sizes or {}).items()}
     size_notes = {str(k): str(v or "") for k, v in (payload.size_notes or {}).items()}
     keywords = [k.strip() for k in (payload.keywords or []) if k and k.strip()]
-    origin_year = await _resolve_origin_year(payload.original_show_id)
+    shows_list = _normalize_costume_shows(payload.shows)
+    origin_year = await _resolve_origin_year_from_shows(shows_list)
+    # sorting_system with legacy alias fallback
+    sorting_system = (payload.sorting_system or payload.sizing_system or "Letter").strip()
     # Normalize flags list
     flags = []
     for f in (payload.flags or []):
@@ -510,14 +578,13 @@ async def create_costume(payload: CostumeCreate):
         "sub_location": (payload.sub_location or "").strip(),
         "notes": (payload.notes or "").strip(),
         "note_image_ids": [str(x) for x in (payload.note_image_ids or []) if x],
-        "sizing_system": (payload.sizing_system or "Letter").strip(),
+        "sorting_system": sorting_system,
         "sizes": sizes,
         "size_notes": size_notes,
         "keywords": keywords,
         "creator": (payload.creator or "").strip(),
         "buy_link": (payload.buy_link or "").strip(),
-        "original_show_id": payload.original_show_id,
-        "additional_show_ids": list(payload.additional_show_ids or []),
+        "shows": shows_list,
         "origin_year": origin_year,
         "total_quantity": _compute_total(sizes),
         "image_id": payload.image_id,
@@ -552,8 +619,14 @@ async def update_costume(costume_id: str, payload: CostumeUpdate):
         updates["size_notes"] = {str(k): str(v or "") for k, v in (updates["size_notes"] or {}).items()}
     if "keywords" in updates:
         updates["keywords"] = [k.strip() for k in (updates["keywords"] or []) if k and k.strip()]
-    if "original_show_id" in updates:
-        updates["origin_year"] = await _resolve_origin_year(updates["original_show_id"])
+    # Legacy field alias: sizing_system -> sorting_system
+    if "sizing_system" in updates and "sorting_system" not in updates:
+        updates["sorting_system"] = updates["sizing_system"]
+    updates.pop("sizing_system", None)
+    # Normalize new shows list, recompute origin_year
+    if "shows" in updates:
+        updates["shows"] = _normalize_costume_shows(updates["shows"])
+        updates["origin_year"] = await _resolve_origin_year_from_shows(updates["shows"])
     if "flags" in updates:
         raw = updates["flags"] or []
         normalized = []
@@ -764,12 +837,18 @@ async def list_categories():
             await db.categories.update_one({"id": d["id"]}, {"$set": {"subcategories": normalized}})
         d["subcategories"] = normalized
         d.setdefault("color", "#71717A")
+        d.setdefault("image_id", None)
+        d.setdefault("location", "")
+        d.setdefault("sub_location", "")
+        d.setdefault("notes", "")
+        d.setdefault("keywords", [])
+        d.setdefault("creator", "")
     existing = {d["name"] for d in docs}
     used = await db.costumes.distinct("category")
     for u in used:
         if u and u not in existing:
             new_id = str(uuid.uuid4())
-            new_doc = {"id": new_id, "name": u, "subcategories": [], "color": "#71717A", "created_at": _now_iso()}
+            new_doc = {"id": new_id, "name": u, "subcategories": [], "color": "#71717A", "image_id": None, "location": "", "sub_location": "", "notes": "", "keywords": [], "creator": "", "created_at": _now_iso()}
             await db.categories.insert_one(dict(new_doc))
             docs.append(new_doc)
             existing.add(u)
@@ -796,6 +875,12 @@ async def create_category(payload: LocationCreate):
 class CategoryUpdate(BaseModel):
     name: Optional[str] = None
     color: Optional[str] = None
+    image_id: Optional[str] = None
+    location: Optional[str] = None
+    sub_location: Optional[str] = None
+    notes: Optional[str] = None
+    keywords: Optional[List[str]] = None
+    creator: Optional[str] = None
 
 
 @api_router.put("/categories/{category_id}")
@@ -817,6 +902,18 @@ async def update_category(category_id: str, payload: CategoryUpdate):
             updates["name"] = new_name
     if payload.color is not None:
         updates["color"] = payload.color.strip() or "#71717A"
+    if payload.image_id is not None:
+        updates["image_id"] = payload.image_id or None
+    if payload.location is not None:
+        updates["location"] = payload.location.strip()
+    if payload.sub_location is not None:
+        updates["sub_location"] = payload.sub_location.strip()
+    if payload.notes is not None:
+        updates["notes"] = payload.notes.strip()
+    if payload.keywords is not None:
+        updates["keywords"] = [k.strip() for k in payload.keywords if k and k.strip()]
+    if payload.creator is not None:
+        updates["creator"] = payload.creator.strip()
     if updates:
         await db.categories.update_one({"id": category_id}, {"$set": updates})
     updated = await db.categories.find_one({"id": category_id}, {"_id": 0})
@@ -855,7 +952,16 @@ async def add_subcategory(category_id: str, payload: SubcategoryPayload):
         raise HTTPException(status_code=404, detail="Parent subcategory not found")
     if any(s["name"].lower() == name.lower() and s.get("parent_id") == parent_id for s in subs):
         raise HTTPException(status_code=409, detail="Subcategory already exists under this parent")
-    subs.append({"id": str(uuid.uuid4()), "name": name, "parent_id": parent_id})
+    subs.append({
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "parent_id": parent_id,
+        "image_id": payload.image_id,
+        "location": (payload.location or "").strip(),
+        "sub_location": (payload.sub_location or "").strip(),
+        "notes": (payload.notes or "").strip(),
+        "keywords": [k.strip() for k in (payload.keywords or []) if k and k.strip()],
+    })
     await db.categories.update_one({"id": category_id}, {"$set": {"subcategories": subs}})
     updated = await db.categories.find_one({"id": category_id}, {"_id": 0})
     updated["subcategories"] = _normalize_subcategories(updated.get("subcategories"))
@@ -867,16 +973,27 @@ async def rename_subcategory(category_id: str, sub_id: str, payload: Subcategory
     doc = await db.categories.find_one({"id": category_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Category not found")
-    name = payload.name.strip()
-    if not name or "/" in name:
-        raise HTTPException(status_code=400, detail="Invalid name")
     subs = _normalize_subcategories(doc.get("subcategories"))
     target = next((s for s in subs if s["id"] == sub_id), None)
     if not target:
         raise HTTPException(status_code=404, detail="Subcategory not found")
-    if any(s["id"] != sub_id and s["name"].lower() == name.lower() and s.get("parent_id") == target.get("parent_id") for s in subs):
-        raise HTTPException(status_code=409, detail="Sibling with that name already exists")
-    target["name"] = name
+    if payload.name is not None:
+        name = payload.name.strip()
+        if not name or "/" in name:
+            raise HTTPException(status_code=400, detail="Invalid name")
+        if any(s["id"] != sub_id and s["name"].lower() == name.lower() and s.get("parent_id") == target.get("parent_id") for s in subs):
+            raise HTTPException(status_code=409, detail="Sibling with that name already exists")
+        target["name"] = name
+    if payload.image_id is not None:
+        target["image_id"] = payload.image_id or None
+    if payload.location is not None:
+        target["location"] = payload.location.strip()
+    if payload.sub_location is not None:
+        target["sub_location"] = payload.sub_location.strip()
+    if payload.notes is not None:
+        target["notes"] = payload.notes.strip()
+    if payload.keywords is not None:
+        target["keywords"] = [k.strip() for k in payload.keywords if k and k.strip()]
     await db.categories.update_one({"id": category_id}, {"$set": {"subcategories": subs}})
     return {"ok": True}
 
@@ -946,6 +1063,27 @@ async def list_sizing_systems():
     return docs
 
 
+# --- Sorting Systems (new name for the same concept) ---
+@api_router.get("/sorting-systems", response_model=List[SizingSystem])
+async def list_sorting_systems():
+    return await list_sizing_systems()
+
+
+@api_router.post("/sorting-systems", response_model=SizingSystem)
+async def create_sorting_system(payload: SizingSystemPayload):
+    return await create_sizing_system(payload)
+
+
+@api_router.put("/sorting-systems/{system_id}", response_model=SizingSystem)
+async def update_sorting_system(system_id: str, payload: SizingSystemPayload):
+    return await update_sizing_system(system_id, payload)
+
+
+@api_router.delete("/sorting-systems/{system_id}")
+async def delete_sorting_system(system_id: str):
+    return await delete_sizing_system(system_id)
+
+
 @api_router.post("/sizing-systems", response_model=SizingSystem)
 async def create_sizing_system(payload: SizingSystemPayload):
     name = payload.name.strip()
@@ -984,9 +1122,11 @@ async def delete_sizing_system(system_id: str):
     doc = await db.sizing_systems.find_one({"id": system_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Sizing system not found")
-    in_use = await db.costumes.count_documents({"sizing_system": doc["name"]})
+    in_use = await db.costumes.count_documents({
+        "$or": [{"sorting_system": doc["name"]}, {"sizing_system": doc["name"]}]
+    })
     if in_use > 0:
-        raise HTTPException(status_code=409, detail=f"Sizing system is used by {in_use} costume(s)")
+        raise HTTPException(status_code=409, detail=f"Sorting system is used by {in_use} costume(s)")
     await db.sizing_systems.delete_one({"id": system_id})
     return {"ok": True}
 
@@ -1130,7 +1270,6 @@ async def create_show(payload: ShowPayload):
         "image_id": payload.image_id,
         "notes": (payload.notes or "").strip(),
         "show_link": (payload.show_link or "").strip(),
-        "link_timestamp": (payload.link_timestamp or "").strip(),
         "created_at": _now_iso(),
     }
     await db.shows.insert_one(doc)
@@ -1156,13 +1295,14 @@ async def update_show(show_id: str, payload: ShowPayload):
         "image_id": payload.image_id,
         "notes": (payload.notes or "").strip(),
         "show_link": (payload.show_link or "").strip(),
-        "link_timestamp": (payload.link_timestamp or "").strip(),
     }
     await db.shows.update_one({"id": show_id}, {"$set": updates})
-    await db.costumes.update_many(
-        {"original_show_id": show_id},
-        {"$set": {"origin_year": year, "updated_at": _now_iso()}}
-    )
+    # Recompute origin_year for any costume that references this show
+    if year is not None:
+        affected = await db.costumes.find({"shows.show_id": show_id}, {"_id": 0, "id": 1, "shows": 1}).to_list(2000)
+        for c in affected:
+            ny = await _resolve_origin_year_from_shows(c.get("shows") or [])
+            await db.costumes.update_one({"id": c["id"]}, {"$set": {"origin_year": ny, "updated_at": _now_iso()}})
     updated = await db.shows.find_one({"id": show_id}, {"_id": 0})
     return updated
 
@@ -1172,12 +1312,15 @@ async def delete_show(show_id: str):
     doc = await db.shows.find_one({"id": show_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Show not found")
-    used_original = await db.costumes.count_documents({"original_show_id": show_id})
-    used_additional = await db.costumes.count_documents({"additional_show_ids": show_id})
-    if used_original + used_additional > 0:
+    in_use = await db.costumes.count_documents({"shows.show_id": show_id})
+    legacy = await db.costumes.count_documents({
+        "$or": [{"original_show_id": show_id}, {"additional_show_ids": show_id}]
+    })
+    total = in_use + legacy
+    if total > 0:
         raise HTTPException(
             status_code=409,
-            detail=f"Show is used by {used_original + used_additional} costume(s)"
+            detail=f"Show is used by {total} costume(s)"
         )
     await db.shows.delete_one({"id": show_id})
     return {"ok": True}
@@ -1525,6 +1668,38 @@ async def startup():
             })
     # Migration: ensure every location doc has parent_id field
     await db.locations.update_many({"parent_id": {"$exists": False}}, {"$set": {"parent_id": None}})
+
+    # Migration: rename costume `sizing_system` → `sorting_system` for docs missing the new field
+    await db.costumes.update_many(
+        {"sorting_system": {"$exists": False}, "sizing_system": {"$exists": True}},
+        [{"$set": {"sorting_system": "$sizing_system"}}]
+    )
+    await db.costumes.update_many(
+        {"sorting_system": {"$exists": False}},
+        {"$set": {"sorting_system": "Letter"}}
+    )
+
+    # Migration: build costume `shows` list from legacy `original_show_id`/`additional_show_ids`
+    async for c in db.costumes.find({"shows": {"$exists": False}}, {"_id": 0, "id": 1, "original_show_id": 1, "additional_show_ids": 1}):
+        merged: List[Dict] = []
+        seen = set()
+        for sid in [c.get("original_show_id")] + list(c.get("additional_show_ids") or []):
+            if sid and sid not in seen:
+                seen.add(sid)
+                merged.append({"show_id": sid, "timestamp": ""})
+        origin = await _resolve_origin_year_from_shows(merged)
+        await db.costumes.update_one(
+            {"id": c["id"]},
+            {"$set": {"shows": merged, "origin_year": origin}}
+        )
+    # Also normalize any existing `shows` docs into the new schema
+    async for c in db.costumes.find({"shows": {"$exists": True}}, {"_id": 0, "id": 1, "shows": 1}):
+        norm = _normalize_costume_shows(c.get("shows"))
+        if norm != c.get("shows"):
+            await db.costumes.update_one({"id": c["id"]}, {"$set": {"shows": norm}})
+
+    # Migration: drop legacy `link_timestamp` from all show docs
+    await db.shows.update_many({"link_timestamp": {"$exists": True}}, {"$unset": {"link_timestamp": ""}})
 
 
 @app.on_event("shutdown")

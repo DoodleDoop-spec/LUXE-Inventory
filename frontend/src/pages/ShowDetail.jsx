@@ -8,7 +8,6 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { buildTimestampedUrl } from "@/lib/videoLink";
 
 export default function ShowDetail() {
   const { id } = useParams();
@@ -42,9 +41,21 @@ export default function ShowDetail() {
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
 
   const attachedIds = useMemo(() => new Set(costumes.map((c) => c.id)), [costumes]);
-  const originals = useMemo(() => costumes.filter((c) => c.original_show_id === id), [costumes, id]);
+  // With the new per-costume shows list, all attached costumes are shown together.
+  // We keep two buckets for backward compat: costumes whose FIRST show is this one, vs others.
+  const showsFor = (c) => (c.shows && c.shows.length ? c.shows : ((c.original_show_id ? [{ show_id: c.original_show_id, timestamp: "" }] : []).concat((c.additional_show_ids || []).map((sid) => ({ show_id: sid, timestamp: "" })))));
+  const originals = useMemo(
+    () => costumes.filter((c) => {
+      const ss = showsFor(c);
+      return ss.length > 0 && ss[0].show_id === id;
+    }),
+    [costumes, id]
+  );
   const additionals = useMemo(
-    () => costumes.filter((c) => c.original_show_id !== id && (c.additional_show_ids || []).includes(id)),
+    () => costumes.filter((c) => {
+      const ss = showsFor(c);
+      return ss.length > 0 && ss[0].show_id !== id && ss.some((s) => s.show_id === id);
+    }),
     [costumes, id]
   );
 
@@ -76,15 +87,14 @@ export default function ShowDetail() {
     if (ids.length === 0) { toast.error("Select at least one costume"); return; }
     setPickerSaving(true);
     try {
-      // Update each selected costume: append this show id to additional_show_ids (unless it's original)
       let attached = 0;
       for (const cid of ids) {
         const c = allCostumes.find((x) => x.id === cid);
         if (!c) continue;
-        if (c.original_show_id === id) continue;
-        const existing = new Set(c.additional_show_ids || []);
-        existing.add(id);
-        await api.put(`/costumes/${cid}`, { additional_show_ids: Array.from(existing) });
+        const current = (c.shows && c.shows.length ? c.shows : (c.original_show_id ? [{ show_id: c.original_show_id, timestamp: "" }] : []).concat((c.additional_show_ids || []).map((sid) => ({ show_id: sid, timestamp: "" }))));
+        if (current.some((s) => s.show_id === id)) continue;
+        const next = [...current, { show_id: id, timestamp: "" }];
+        await api.put(`/costumes/${cid}`, { shows: next });
         attached += 1;
       }
       toast.success(`Attached ${attached} costume${attached === 1 ? "" : "s"} to this show`);
@@ -97,20 +107,11 @@ export default function ShowDetail() {
   };
 
   const detachCostume = async (c) => {
-    // Remove this show from additional_show_ids; if original, ask
-    if (c.original_show_id === id) {
-      if (!window.confirm(`"${c.name}" is the ORIGINAL show costume. Clear the original show?`)) return;
-      try {
-        await api.put(`/costumes/${c.id}`, { original_show_id: null });
-        toast.success("Removed from this show");
-        load();
-      } catch { toast.error("Failed to remove"); }
-      return;
-    }
     if (!window.confirm(`Remove "${c.name}" from this show?`)) return;
-    const remaining = (c.additional_show_ids || []).filter((x) => x !== id);
+    const current = (c.shows && c.shows.length ? c.shows : (c.original_show_id ? [{ show_id: c.original_show_id, timestamp: "" }] : []).concat((c.additional_show_ids || []).map((sid) => ({ show_id: sid, timestamp: "" }))));
+    const next = current.filter((s) => s.show_id !== id);
     try {
-      await api.put(`/costumes/${c.id}`, { additional_show_ids: remaining });
+      await api.put(`/costumes/${c.id}`, { shows: next });
       toast.success("Removed from this show");
       load();
     } catch { toast.error("Failed to remove"); }
@@ -153,13 +154,13 @@ export default function ShowDetail() {
           <div className="flex items-center gap-3 flex-wrap mt-5">
             {show.show_link && (
               <a
-                href={buildTimestampedUrl(show.show_link, show.link_timestamp)}
+                href={show.show_link}
                 target="_blank"
                 rel="noreferrer"
                 data-testid="show-watch-link"
                 className="inline-flex items-center gap-1.5 h-10 px-4 border border-[#09090B] text-[#09090B] text-sm hover:bg-[#F4F4F5]"
               >
-                <ExternalLink className="h-4 w-4" /> Watch this show{show.link_timestamp ? ` @ ${show.link_timestamp}` : ""}
+                <ExternalLink className="h-4 w-4" /> Watch this show
               </a>
             )}
             <Button

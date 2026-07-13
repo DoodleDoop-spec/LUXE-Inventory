@@ -229,24 +229,6 @@ export default function Inventory() {
               <List className="h-4 w-4" />
             </button>
           </div>
-          <Button
-            data-testid="new-group-btn"
-            onClick={async () => {
-              const name = window.prompt("New group name?");
-              if (!name || !name.trim()) return;
-              try {
-                const r = await api.post("/groups", { name: name.trim() });
-                toast.success("Group created");
-                navigate(`/group/${r.data.id}`);
-              } catch (err) {
-                toast.error(err.response?.data?.detail || "Failed to create group");
-              }
-            }}
-            variant="outline"
-            className="rounded-none border-[#09090B] h-10"
-          >
-            <Package className="h-4 w-4 mr-1" />New Group
-          </Button>
           <Button data-testid="add-costume-btn" onClick={handleNew} className="bg-[#09090B] hover:bg-[#27272A] rounded-none text-white h-10">
             <Plus className="h-4 w-4 mr-1" />Add Costume
           </Button>
@@ -406,8 +388,8 @@ export default function Inventory() {
         )}
       </div>
 
-      {/* Groups strip */}
-      {groups.length > 0 && (
+      {/* Groups strip removed — groups have been merged into categories */}
+      {false && groups.length > 0 && (
         <section className="space-y-3" data-testid="groups-strip">
           <div className="flex items-center gap-2">
             <Package className="h-4 w-4 text-[#71717A]" />
@@ -567,7 +549,7 @@ export default function Inventory() {
 }
 
 function CostumeCard({ costume, onEdit, onDelete, sizingSystems, showsById, categories, onDragStart, onDragEnd, isDragging }) {
-  const sys = sizingSystems.find((s) => s.name === (costume.sizing_system || "Letter"));
+  const sys = sizingSystems.find((s) => s.name === (costume.sorting_system || costume.sizing_system || "Letter"));
   const sizeKeys = sys?.sizes || Object.keys(costume.sizes || {});
   const anySizeNote = sizeKeys.some((s) => (costume.size_notes?.[s] || "").trim());
   const originShow = costume.original_show_id ? showsById?.[costume.original_show_id] : null;
@@ -649,7 +631,7 @@ function CostumeCard({ costume, onEdit, onDelete, sizingSystems, showsById, cate
         </div>
       )}
       <div className="mt-3">
-        <div className="eyebrow text-[9px] mb-1.5">{costume.sizing_system || "Letter"}</div>
+        <div className="eyebrow text-[9px] mb-1.5">{costume.sorting_system || costume.sizing_system || "Letter"}</div>
         <div className="flex gap-1 flex-wrap">
           {sizeKeys.map((s) => {
             const qty = costume.sizes?.[s] || 0;

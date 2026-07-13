@@ -1,11 +1,12 @@
 import { Outlet, NavLink, Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect, useRef } from "react";
 import { api } from "@/lib/api";
-import { LayoutDashboard, Package, MapPin, Settings as SettingsIcon, Search, X, Film, Flag, Menu } from "lucide-react";
+import { LayoutDashboard, Package, MapPin, Settings as SettingsIcon, Search, X, Film, Flag, Menu, Wrench } from "lucide-react";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, testId: "nav-dashboard" },
   { to: "/inventory", label: "Inventory", icon: Package, testId: "nav-inventory" },
+  { to: "/equipment", label: "Equipment", icon: Wrench, testId: "nav-equipment" },
   { to: "/shows", label: "Shows", icon: Film, testId: "nav-shows" },
   { to: "/locations", label: "Storage", icon: MapPin, testId: "nav-locations" },
   { to: "/flags", label: "Flags", icon: Flag, testId: "nav-flags" },
@@ -159,7 +160,7 @@ export default function Layout() {
 
           {/* Mobile nav drawer */}
           {mobileNavOpen && (
-            <nav className="md:hidden border-t border-[#E4E4E7] py-2 grid grid-cols-3 gap-1" data-testid="mobile-nav">
+            <nav className="md:hidden border-t border-[#E4E4E7] py-2 grid grid-cols-4 gap-1" data-testid="mobile-nav">
               {navItems.map(({ to, label, icon: Icon, testId }) => {
                 const active = to === "/" ? location.pathname === "/" : location.pathname.startsWith(to);
                 return (

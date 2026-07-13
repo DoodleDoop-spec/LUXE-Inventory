@@ -41,8 +41,8 @@ export default function CostumeFormDialog({
   const [flagCategories, setFlagCategories] = useState([]);
   const [creator, setCreator] = useState("");
   const [buyLink, setBuyLink] = useState("");
-  const [originalShowId, setOriginalShowId] = useState("");
-  const [additionalShowIds, setAdditionalShowIds] = useState([]);
+  const [costumeShows, setCostumeShows] = useState([]); // array of {show_id, timestamp}
+  const [showLinkEdits, setShowLinkEdits] = useState({}); // {show_id: link} — inline edits to show.show_link
   const [keywords, setKeywords] = useState([]);
   const [kwInput, setKwInput] = useState("");
   const [groupId, setGroupId] = useState("");
@@ -56,6 +56,9 @@ export default function CostumeFormDialog({
   const [addingShow, setAddingShow] = useState(false);
   const [newShowName, setNewShowName] = useState("");
   const [newShowYear, setNewShowYear] = useState("");
+  const [addingSortingSystem, setAddingSortingSystem] = useState(false);
+  const [newSortingName, setNewSortingName] = useState("");
+  const [newSortingSizes, setNewSortingSizes] = useState("");
   const [similarCats, setSimilarCats] = useState([]);
   const fileRef = useRef(null);
   const noteFileRef = useRef(null);
@@ -114,7 +117,7 @@ export default function CostumeFormDialog({
       setCategory(editing.category || "");
       setNewCategory("");
       setSubcategoryPath([]);
-      setSystemName(editing.sizing_system || "Letter");
+      setSystemName(editing.sorting_system || editing.sizing_system || "Letter");
       // Try to reconstruct locPath from stored location path
       const match = (locations || []).find((l) => l.path === editing.location);
       if (match) {
@@ -143,8 +146,18 @@ export default function CostumeFormDialog({
       setFlags(editing.flags ? editing.flags.map((f) => ({ id: f.id, category_id: f.category_id, note: f.note || "", image_ids: f.image_ids || [] })) : []);
       setCreator(editing.creator || "");
       setBuyLink(editing.buy_link || "");
-      setOriginalShowId(editing.original_show_id || "");
-      setAdditionalShowIds(editing.additional_show_ids || []);
+      // Build costumeShows list — prefer new `shows`, fall back to legacy fields
+      if (editing.shows && editing.shows.length) {
+        setCostumeShows(editing.shows.map((s) => ({ show_id: s.show_id, timestamp: s.timestamp || "" })));
+      } else {
+        const legacy = [];
+        if (editing.original_show_id) legacy.push({ show_id: editing.original_show_id, timestamp: "" });
+        for (const sid of editing.additional_show_ids || []) {
+          if (!legacy.find((x) => x.show_id === sid)) legacy.push({ show_id: sid, timestamp: "" });
+        }
+        setCostumeShows(legacy);
+      }
+      setShowLinkEdits({});
       setKeywords(editing.keywords || []);
       setGroupId(editing.group_id || "");
       setVariantLabel(editing.variant_label || "");
@@ -164,8 +177,8 @@ export default function CostumeFormDialog({
       setFlags([]);
       setCreator("");
       setBuyLink("");
-      setOriginalShowId("");
-      setAdditionalShowIds([]);
+      setCostumeShows([]);
+      setShowLinkEdits({});
       setKeywords([]);
       setGroupId("");
       setVariantLabel("");
@@ -179,6 +192,9 @@ export default function CostumeFormDialog({
     setAddingShow(false);
     setNewShowName("");
     setNewShowYear("");
+    setAddingSortingSystem(false);
+    setNewSortingName("");
+    setNewSortingSizes("");
     setSimilarCats([]);
     setOpenSizeNote(null);
     setKwInput("");
@@ -264,7 +280,31 @@ export default function CostumeFormDialog({
   const removeKeyword = (kw) => setKeywords((prev) => prev.filter((k) => k !== kw));
 
   const toggleAdditionalShow = (id) => {
-    setAdditionalShowIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
+    // legacy no-op — replaced by per-costume shows list
+    setCostumeShows((prev) => prev.find((s) => s.show_id === id)
+      ? prev.filter((s) => s.show_id !== id)
+      : [...prev, { show_id: id, timestamp: "" }]);
+  };
+
+  const addCostumeShow = (showId) => {
+    if (!showId || showId === "__none__") return;
+    if (showId === "__add_new__") { setAddingShow(true); return; }
+    setCostumeShows((prev) => prev.find((s) => s.show_id === showId)
+      ? prev
+      : [...prev, { show_id: showId, timestamp: "" }]);
+  };
+
+  const removeCostumeShow = (showId) => {
+    setCostumeShows((prev) => prev.filter((s) => s.show_id !== showId));
+    setShowLinkEdits((prev) => {
+      const next = { ...prev };
+      delete next[showId];
+      return next;
+    });
+  };
+
+  const updateCostumeShowTimestamp = (showId, ts) => {
+    setCostumeShows((prev) => prev.map((s) => s.show_id === showId ? { ...s, timestamp: ts } : s));
   };
 
   const handleUpload = async (e) => {
@@ -388,13 +428,34 @@ export default function CostumeFormDialog({
     try {
       const r = await api.post("/shows", { name: nm, year: yr });
       toast.success("Show created");
-      setOriginalShowId(r.data.id);
+      // Add the new show to the costume's shows list
+      setCostumeShows((prev) => prev.find((s) => s.show_id === r.data.id)
+        ? prev
+        : [...prev, { show_id: r.data.id, timestamp: "" }]);
       setAddingShow(false);
       setNewShowName("");
       setNewShowYear("");
       onSaved?.({ refresh_only: true });
     } catch (err) {
       toast.error(err.response?.data?.detail || "Failed to create show");
+    }
+  };
+
+  const createSortingSystemInline = async () => {
+    const nm = newSortingName.trim();
+    const sizes = newSortingSizes.split(",").map((s) => s.trim()).filter(Boolean);
+    if (!nm) { toast.error("Name required"); return; }
+    if (!sizes.length) { toast.error("At least one value required (comma-separated)"); return; }
+    try {
+      await api.post("/sorting-systems", { name: nm, sizes });
+      toast.success("Sorting system created");
+      setSystemName(nm);
+      setAddingSortingSystem(false);
+      setNewSortingName("");
+      setNewSortingSizes("");
+      onSaved?.({ refresh_only: true });
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to create sorting system");
     }
   };
 
@@ -410,6 +471,23 @@ export default function CostumeFormDialog({
     try {
       if (category === "__new__" && newCategory.trim()) {
         try { await api.post("/categories", { name: newCategory.trim() }); } catch (err) { /* ignore */ }
+      }
+      // Persist any inline show_link edits before saving costume
+      for (const [sid, link] of Object.entries(showLinkEdits || {})) {
+        const trimmed = (link || "").trim();
+        if (!trimmed) continue;
+        const original = (shows || []).find((s) => s.id === sid);
+        if (!original) continue;
+        if ((original.show_link || "").trim() === trimmed) continue;
+        try {
+          await api.put(`/shows/${sid}`, {
+            name: original.name,
+            year: original.year,
+            image_id: original.image_id || null,
+            notes: original.notes || "",
+            show_link: trimmed,
+          });
+        } catch { /* ignore individual failures */ }
       }
       const cleanedFlags = flags
         .filter((f) => f.category_id)
@@ -427,14 +505,13 @@ export default function CostumeFormDialog({
         sub_location: locMode === "preset" ? subLocation.trim() : "",
         notes: notes.trim(),
         note_image_ids: [...noteImageIds],
-        sizing_system: systemName,
+        sorting_system: systemName,
         sizes: Object.fromEntries(sizeKeys.map((s) => [s, Number(sizes[s]) || 0])),
         size_notes: Object.fromEntries(sizeKeys.map((s) => [s, (sizeNotes[s] || "").trim()])),
         keywords,
         creator: creator.trim(),
         buy_link: buyLink.trim(),
-        original_show_id: originalShowId || null,
-        additional_show_ids: additionalShowIds.filter((x) => x !== originalShowId),
+        shows: costumeShows.map((s) => ({ show_id: s.show_id, timestamp: (s.timestamp || "").trim() })),
         image_id: imageId,
         is_flagged: isFlagged || cleanedFlags.length > 0,
         flag_reason: isFlagged ? flagReason.trim() : "",
@@ -467,7 +544,7 @@ export default function CostumeFormDialog({
             {editing ? "Edit Costume" : "Add Costume"}
           </DialogTitle>
           <DialogDescription className="text-[#71717A]">
-            Fill out costume details, choose a location and sizing system.
+            Fill out costume details, choose a location and sorting system.
           </DialogDescription>
         </DialogHeader>
 
@@ -689,19 +766,26 @@ export default function CostumeFormDialog({
             )}
           </div>
 
-          {/* Sizing system + sizes */}
+          {/* Sorting system + values */}
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="flex items-center gap-3">
-                <Label className="eyebrow">SIZING SYSTEM</Label>
-                <Select value={systemName} onValueChange={setSystemName}>
-                  <SelectTrigger data-testid="form-sizing-system" className="rounded-none border-[#E4E4E7] h-9 min-w-[200px]">
+                <Label className="eyebrow">SORTING SYSTEM</Label>
+                <Select
+                  value={systemName}
+                  onValueChange={(v) => {
+                    if (v === "__add_new__") { setAddingSortingSystem(true); return; }
+                    setSystemName(v);
+                  }}
+                >
+                  <SelectTrigger data-testid="form-sorting-system" className="rounded-none border-[#E4E4E7] h-9 min-w-[220px]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     {(sizingSystems || []).map((s) => (
                       <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>
                     ))}
+                    <SelectItem value="__add_new__">+ New sorting system…</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -709,9 +793,51 @@ export default function CostumeFormDialog({
                 Total: <span className="font-semibold text-[#09090B] tabular-nums" data-testid="form-total">{total}</span>
               </div>
             </div>
+
+            {addingSortingSystem && (
+              <div className="border border-[#E4E4E7] p-3 space-y-2 bg-[#FAFAFA]" data-testid="form-new-sorting-inline">
+                <div className="grid md:grid-cols-2 gap-2">
+                  <Input
+                    data-testid="form-new-sorting-name"
+                    value={newSortingName}
+                    onChange={(e) => setNewSortingName(e.target.value)}
+                    placeholder="System name e.g. Colors, Rings"
+                    className="rounded-none border-[#E4E4E7] h-10 bg-white"
+                  />
+                  <Input
+                    data-testid="form-new-sorting-sizes"
+                    value={newSortingSizes}
+                    onChange={(e) => setNewSortingSizes(e.target.value)}
+                    placeholder="Values (comma-separated) e.g. Red, Blue, Green"
+                    className="rounded-none border-[#E4E4E7] h-10 bg-white"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    data-testid="form-new-sorting-save"
+                    onClick={createSortingSystemInline}
+                    disabled={!newSortingName.trim() || !newSortingSizes.trim()}
+                    className="bg-[#09090B] hover:bg-[#27272A] rounded-none h-9 text-white"
+                  >
+                    <Plus className="h-3.5 w-3.5 mr-1" /> Create &amp; use
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => { setAddingSortingSystem(false); setNewSortingName(""); setNewSortingSizes(""); }}
+                    className="rounded-none h-9"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+                <p className="text-xs text-[#A1A1AA]">A sorting system is any set of values to group inventory by — sizes, colors, ring positions, anything.</p>
+              </div>
+            )}
+
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-px bg-[#E4E4E7] border border-[#E4E4E7]">
               {sizeKeys.length === 0 ? (
-                <div className="bg-white p-4 col-span-full text-center text-sm text-[#71717A]">Select a sizing system.</div>
+                <div className="bg-white p-4 col-span-full text-center text-sm text-[#71717A]">Select a sorting system.</div>
               ) : sizeKeys.map((s) => {
                 const hasNote = (sizeNotes[s] || "").trim().length > 0;
                 return (
@@ -761,7 +887,7 @@ export default function CostumeFormDialog({
             )}
           </div>
 
-          {/* Creator + Buy Link + Original show + Additional shows + Keywords */}
+          {/* Creator + Buy Link + Keywords */}
           <div className="grid md:grid-cols-2 gap-5">
             <div className="space-y-2">
               <Label className="eyebrow">CREATOR</Label>
@@ -787,94 +913,127 @@ export default function CostumeFormDialog({
                 />
               </div>
             </div>
-            <div className="space-y-2">
-              <Label className="eyebrow">ORIGINAL SHOW</Label>
-              {addingShow ? (
-                <div className="border border-[#E4E4E7] p-3 space-y-2 bg-[#FAFAFA]" data-testid="form-new-show-inline">
-                  <div className="grid md:grid-cols-2 gap-2">
-                    <Input
-                      data-testid="form-new-show-name"
-                      value={newShowName}
-                      onChange={(e) => setNewShowName(e.target.value)}
-                      placeholder="Show name"
-                      className="rounded-none border-[#E4E4E7] h-10 bg-white"
-                    />
-                    <Input
-                      type="number"
-                      min="1800"
-                      max="2200"
-                      data-testid="form-new-show-year"
-                      value={newShowYear}
-                      onChange={(e) => setNewShowYear(e.target.value)}
-                      placeholder="Year (optional)"
-                      className="rounded-none border-[#E4E4E7] h-10 bg-white"
-                    />
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      data-testid="form-new-show-save"
-                      onClick={createShowInline}
-                      disabled={!newShowName.trim()}
-                      className="bg-[#09090B] hover:bg-[#27272A] rounded-none h-9 text-white"
-                    >
-                      <Plus className="h-3.5 w-3.5 mr-1" /> Create &amp; use
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => { setAddingShow(false); setNewShowName(""); setNewShowYear(""); }}
-                      className="rounded-none h-9"
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <Select
-                  value={originalShowId || "__none__"}
-                  onValueChange={(v) => {
-                    if (v === "__add_new__") { setAddingShow(true); return; }
-                    setOriginalShowId(v === "__none__" ? "" : v);
-                  }}
-                >
-                  <SelectTrigger data-testid="form-original-show" className="rounded-none border-[#E4E4E7] h-11">
-                    <SelectValue placeholder="Select a show" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">— None —</SelectItem>
-                    {(shows || []).map((s) => (
-                      <SelectItem key={s.id} value={s.id}>{s.name}{s.year ? ` (${s.year})` : ""}</SelectItem>
-                    ))}
-                    <SelectItem value="__add_new__">+ Add new show…</SelectItem>
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
           </div>
 
-          {(shows || []).length > 0 && (
-            <div className="space-y-2">
-              <Label className="eyebrow">ADDITIONAL SHOWS</Label>
-              <div className="border border-[#E4E4E7] p-3 flex flex-wrap gap-2 max-h-40 overflow-y-auto" data-testid="form-additional-shows">
-                {shows.filter((s) => s.id !== originalShowId).map((s) => {
-                  const checked = additionalShowIds.includes(s.id);
+          {/* Shows this costume appears in — with per-costume timestamps */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <Label className="eyebrow">SHOWS THIS COSTUME APPEARS IN</Label>
+              <div className="text-xs text-[#71717A]">{costumeShows.length} show{costumeShows.length === 1 ? "" : "s"}</div>
+            </div>
+
+            {costumeShows.length > 0 && (
+              <div className="border border-[#E4E4E7] divide-y divide-[#E4E4E7]" data-testid="form-costume-shows">
+                {costumeShows.map((entry) => {
+                  const show = (shows || []).find((s) => s.id === entry.show_id);
+                  const hasLink = show && ((showLinkEdits[entry.show_id] ?? show.show_link ?? "").trim().length > 0);
                   return (
-                    <button
-                      key={s.id}
-                      type="button"
-                      data-testid={`form-add-show-${s.id}`}
-                      onClick={() => toggleAdditionalShow(s.id)}
-                      className={`text-xs px-2 py-1 border ${checked ? "bg-[#09090B] text-white border-[#09090B]" : "bg-white text-[#09090B] border-[#E4E4E7]"}`}
-                    >
-                      {s.name}{s.year ? ` · ${s.year}` : ""}
-                    </button>
+                    <div key={entry.show_id} className="p-3 bg-white space-y-2" data-testid={`form-costume-show-${entry.show_id}`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="font-medium text-[#09090B] text-sm truncate">
+                            {show ? show.name : "Unknown show"}{show?.year ? ` · ${show.year}` : ""}
+                          </div>
+                          {!hasLink && (
+                            <div className="text-[10px] font-mono-label tracking-widest text-[#B45309] mt-0.5">
+                              NO VIDEO LINK ON SHOW — ADD ONE BELOW
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          data-testid={`form-remove-show-${entry.show_id}`}
+                          onClick={() => removeCostumeShow(entry.show_id)}
+                          className="text-[#71717A] hover:text-[#EF4444] p-1"
+                          aria-label="Remove show"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <div className="grid sm:grid-cols-2 gap-2">
+                        <div className="relative">
+                          <LinkIcon className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[#71717A]" />
+                          <Input
+                            type="url"
+                            data-testid={`form-show-link-${entry.show_id}`}
+                            value={showLinkEdits[entry.show_id] ?? show?.show_link ?? ""}
+                            onChange={(e) => setShowLinkEdits((prev) => ({ ...prev, [entry.show_id]: e.target.value }))}
+                            placeholder="Show video link (YouTube, Vimeo, …)"
+                            className="rounded-none border-[#E4E4E7] h-9 pl-8 text-xs"
+                          />
+                        </div>
+                        <Input
+                          data-testid={`form-show-timestamp-${entry.show_id}`}
+                          value={entry.timestamp}
+                          onChange={(e) => updateCostumeShowTimestamp(entry.show_id, e.target.value)}
+                          placeholder="Timestamp e.g. 12:34 or 1:23:45"
+                          className="rounded-none border-[#E4E4E7] h-9 text-xs"
+                        />
+                      </div>
+                    </div>
                   );
                 })}
               </div>
-              <p className="text-xs text-[#A1A1AA]">Click to toggle. Selected shows are highlighted.</p>
-            </div>
-          )}
+            )}
+
+            {addingShow ? (
+              <div className="border border-[#E4E4E7] p-3 space-y-2 bg-[#FAFAFA]" data-testid="form-new-show-inline">
+                <div className="grid md:grid-cols-2 gap-2">
+                  <Input
+                    data-testid="form-new-show-name"
+                    value={newShowName}
+                    onChange={(e) => setNewShowName(e.target.value)}
+                    placeholder="Show name"
+                    className="rounded-none border-[#E4E4E7] h-10 bg-white"
+                  />
+                  <Input
+                    type="number"
+                    min="1800"
+                    max="2200"
+                    data-testid="form-new-show-year"
+                    value={newShowYear}
+                    onChange={(e) => setNewShowYear(e.target.value)}
+                    placeholder="Year (optional)"
+                    className="rounded-none border-[#E4E4E7] h-10 bg-white"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    data-testid="form-new-show-save"
+                    onClick={createShowInline}
+                    disabled={!newShowName.trim()}
+                    className="bg-[#09090B] hover:bg-[#27272A] rounded-none h-9 text-white"
+                  >
+                    <Plus className="h-3.5 w-3.5 mr-1" /> Create &amp; add
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => { setAddingShow(false); setNewShowName(""); setNewShowYear(""); }}
+                    className="rounded-none h-9"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <Select
+                value=""
+                onValueChange={addCostumeShow}
+              >
+                <SelectTrigger data-testid="form-add-show-select" className="rounded-none border-[#E4E4E7] h-10">
+                  <SelectValue placeholder="+ Add a show…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(shows || []).filter((s) => !costumeShows.find((cs) => cs.show_id === s.id)).map((s) => (
+                    <SelectItem key={s.id} value={s.id}>{s.name}{s.year ? ` (${s.year})` : ""}</SelectItem>
+                  ))}
+                  <SelectItem value="__add_new__">+ Add new show…</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          </div>
 
           <div className="space-y-2">
             <Label className="eyebrow">KEYWORDS</Label>

@@ -4,6 +4,7 @@ import { api } from "@/lib/api";
 import { ArrowLeft, MapPin, Pencil, Trash2, Flag, StickyNote, Calendar, Tag, Sparkles, Users, ExternalLink, ShoppingBag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import CostumeFormDialog from "@/components/CostumeFormDialog";
+import { buildTimestampedUrl } from "@/lib/videoLink";
 import { toast } from "sonner";
 
 export default function CostumeDetail() {
@@ -64,10 +65,18 @@ export default function CostumeDetail() {
 
   if (!costume) return <div className="py-20 eyebrow">LOADING…</div>;
 
-  const sys = sizingSystems.find((s) => s.name === (costume.sizing_system || "Letter"));
+  const sys = sizingSystems.find((s) => s.name === (costume.sorting_system || costume.sizing_system || "Letter"));
   const sizeKeys = sys?.sizes || Object.keys(costume.sizes || {});
-  const originShow = costume.original_show_id ? showsById[costume.original_show_id] : null;
-  const additionalShows = (costume.additional_show_ids || []).map((sid) => showsById[sid]).filter(Boolean);
+  // Prefer new `shows` list; fall back to legacy fields
+  const costumeShowEntries = (costume.shows && costume.shows.length)
+    ? costume.shows
+    : [
+        ...(costume.original_show_id ? [{ show_id: costume.original_show_id, timestamp: "" }] : []),
+        ...(costume.additional_show_ids || []).map((sid) => ({ show_id: sid, timestamp: "" })),
+      ];
+  const showEntries = costumeShowEntries
+    .map((e) => ({ ...e, show: showsById[e.show_id] }))
+    .filter((e) => e.show);
   const flagCatById = {};
   for (const fc of flagCategories) flagCatById[fc.id] = fc;
   const attachedFlags = costume.flags || [];
@@ -200,26 +209,40 @@ export default function CostumeDetail() {
               )}
             </div>
 
-            {(originShow || additionalShows.length > 0) && (
-              <div className="border-l-2 border-[#09090B] pl-4 mt-5 space-y-2" data-testid="detail-shows">
-                {originShow && (
-                  <div>
-                    <div className="eyebrow">ORIGINAL SHOW</div>
-                    <div className="font-medium text-[#09090B]">{originShow.name}{originShow.year ? ` · ${originShow.year}` : ""}</div>
-                  </div>
-                )}
-                {additionalShows.length > 0 && (
-                  <div>
-                    <div className="eyebrow flex items-center gap-1">
-                      <Users className="h-3 w-3" /> ADDITIONAL SHOWS
-                    </div>
-                    <ul className="mt-1 space-y-0.5 text-sm text-[#27272A]">
-                      {additionalShows.map((s) => (
-                        <li key={s.id}>{s.name}{s.year ? ` · ${s.year}` : ""}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+            {showEntries.length > 0 && (
+              <div className="border-l-2 border-[#09090B] pl-4 mt-5 space-y-3" data-testid="detail-shows">
+                <div className="eyebrow flex items-center gap-1">
+                  <Users className="h-3 w-3" /> SHOWS ({showEntries.length})
+                </div>
+                <ul className="space-y-2">
+                  {showEntries.map(({ show, timestamp }) => {
+                    const link = show.show_link;
+                    const watchUrl = link ? (timestamp ? buildTimestampedUrl(link, timestamp) : link) : null;
+                    return (
+                      <li key={show.id} className="flex items-center justify-between gap-3 flex-wrap" data-testid={`detail-show-${show.id}`}>
+                        <div className="min-w-0">
+                          <Link to={`/shows/${show.id}`} className="font-medium text-[#09090B] hover:underline">
+                            {show.name}{show.year ? ` · ${show.year}` : ""}
+                          </Link>
+                          {timestamp && (
+                            <span className="ml-2 text-xs font-mono-label text-[#71717A]">@ {timestamp}</span>
+                          )}
+                        </div>
+                        {watchUrl && (
+                          <a
+                            href={watchUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-xs text-[#09090B] hover:underline"
+                            data-testid={`detail-show-watch-${show.id}`}
+                          >
+                            <ExternalLink className="h-3 w-3" /> Watch{timestamp ? " @ moment" : ""}
+                          </a>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
               </div>
             )}
 
@@ -239,7 +262,7 @@ export default function CostumeDetail() {
             <div className="flex items-baseline justify-between gap-4 flex-wrap">
               <div>
                 <div className="eyebrow">TOTAL QUANTITY</div>
-                <div className="text-xs text-[#71717A] mt-1 font-mono-label">SYSTEM · {costume.sizing_system || "Letter"}</div>
+                <div className="text-xs text-[#71717A] mt-1 font-mono-label">SYSTEM · {costume.sorting_system || costume.sizing_system || "Letter"}</div>
               </div>
               <div className="font-display text-6xl font-bold tabular-nums text-[#09090B]" data-testid="detail-total">
                 {costume.total_quantity}

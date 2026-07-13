@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
-import { Package, Tag, ArrowUpRight, Plus, Flag, Sparkles } from "lucide-react";
+import { Package, Tag, ArrowUpRight, Plus, Flag, Sparkles, Film, MapPin, Wrench, Boxes } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function Dashboard() {
@@ -10,6 +10,7 @@ export default function Dashboard() {
   const [flagged, setFlagged] = useState([]);
   const [inUse, setInUse] = useState([]);
   const [orgName, setOrgName] = useState("LUXE");
+  const navigate = useNavigate();
 
   useEffect(() => {
     (async () => {
@@ -31,10 +32,14 @@ export default function Dashboard() {
   }, []);
 
   const tiles = [
-    { label: "Total Items", value: stats?.total_costumes ?? "—", icon: Package, testId: "stat-total-costumes" },
-    { label: "In Use", value: stats?.in_use_count ?? 0, icon: Sparkles, testId: "stat-in-use", accent: (stats?.in_use_count || 0) > 0 },
-    { label: "Categories", value: stats?.category_count ?? "—", icon: Tag, testId: "stat-categories" },
-    { label: "Flagged", value: stats?.flagged_count ?? 0, icon: Flag, testId: "stat-flagged", danger: (stats?.flagged_count || 0) > 0 },
+    { label: "Total Pieces", value: stats?.total_costumes ?? "—", icon: Package, testId: "stat-total-costumes", to: "/inventory" },
+    { label: "Total Quantity", value: stats?.total_items ?? "—", icon: Boxes, testId: "stat-total-quantity", to: "/inventory" },
+    { label: "Equipment", value: stats?.equipment_count ?? 0, icon: Wrench, testId: "stat-equipment", to: "/equipment" },
+    { label: "In Use", value: stats?.in_use_count ?? 0, icon: Sparkles, testId: "stat-in-use", accent: (stats?.in_use_count || 0) > 0, to: "/inventory" },
+    { label: "Categories", value: stats?.category_count ?? "—", icon: Tag, testId: "stat-categories", to: "/settings" },
+    { label: "Storage Locations", value: stats?.total_locations ?? "—", icon: MapPin, testId: "stat-locations", to: "/locations" },
+    { label: "Shows", value: stats?.total_shows ?? "—", icon: Film, testId: "stat-shows", to: "/shows" },
+    { label: "Flagged", value: stats?.flagged_count ?? 0, icon: Flag, testId: "stat-flagged", danger: (stats?.flagged_count || 0) > 0, to: "/flags" },
   ];
 
   return (
@@ -65,18 +70,20 @@ export default function Dashboard() {
       <div className="divider-thick" />
 
       <section className="grid grid-cols-2 md:grid-cols-4 gap-px bg-[#E4E4E7] border border-[#E4E4E7]">
-        {tiles.map(({ label, value, icon: Icon, testId, accent, danger }) => (
-          <div
+        {tiles.map(({ label, value, icon: Icon, testId, accent, danger, to }) => (
+          <button
             key={label}
+            type="button"
+            onClick={() => to && navigate(to)}
             data-testid={testId}
-            className={`p-6 md:p-8 flex flex-col justify-between min-h-[160px] ${
-              danger ? "bg-[#FEF2F2]" : accent ? "bg-[#ECFDF5]" : "bg-white"
+            className={`p-6 md:p-8 flex flex-col justify-between min-h-[160px] text-left transition-colors group ${
+              danger ? "bg-[#FEF2F2] hover:bg-[#FEE2E2]" : accent ? "bg-[#ECFDF5] hover:bg-[#D1FAE5]" : "bg-white hover:bg-[#FAFAFA]"
             }`}
           >
             <div className="flex items-center justify-between">
               <span className={`eyebrow ${danger ? "text-[#B91C1C]" : accent ? "text-[#059669]" : ""}`}>{label}</span>
               <Icon
-                className={`h-4 w-4 ${danger ? "text-[#EF4444]" : accent ? "text-[#10B981]" : "text-[#71717A]"}`}
+                className={`h-4 w-4 transition-transform group-hover:scale-110 ${danger ? "text-[#EF4444]" : accent ? "text-[#10B981]" : "text-[#71717A]"}`}
                 strokeWidth={2}
                 fill={danger && Icon === Flag ? "currentColor" : "none"}
               />
@@ -86,7 +93,10 @@ export default function Dashboard() {
             }`}>
               {value}
             </div>
-          </div>
+            <div className="mt-2 text-[10px] font-mono-label tracking-widest text-[#A1A1AA] opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+              VIEW <ArrowUpRight className="h-3 w-3" />
+            </div>
+          </button>
         ))}
       </section>
 

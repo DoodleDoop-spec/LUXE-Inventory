@@ -11,6 +11,7 @@ import Shows from "@/pages/Shows";
 import ShowDetail from "@/pages/ShowDetail";
 import GroupDetail from "@/pages/GroupDetail";
 import Flags from "@/pages/Flags";
+import Equipment from "@/pages/Equipment";
 
 function App() {
   return (
@@ -20,6 +21,7 @@ function App() {
           <Route element={<Layout />}>
             <Route path="/" element={<Dashboard />} />
             <Route path="/inventory" element={<Inventory />} />
+            <Route path="/equipment" element={<Equipment />} />
             <Route path="/costume/:id" element={<CostumeDetail />} />
             <Route path="/locations" element={<Locations />} />
             <Route path="/shows" element={<Shows />} />
