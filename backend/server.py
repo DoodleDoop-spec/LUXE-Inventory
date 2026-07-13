@@ -135,7 +135,7 @@ class CostumeBase(BaseModel):
     sub_location: Optional[str] = ""
     notes: Optional[str] = ""
     note_image_ids: List[str] = Field(default_factory=list)
-    sorting_system: Optional[str] = "Letter"
+    sorting_system: Optional[str] = ""
     sizes: Dict[str, int] = Field(default_factory=dict)
     size_notes: Dict[str, str] = Field(default_factory=dict)
     keywords: List[str] = Field(default_factory=list)
@@ -146,6 +146,9 @@ class CostumeBase(BaseModel):
     variant_label: Optional[str] = ""
     in_use: Optional[bool] = False
     in_use_note: Optional[str] = ""
+    current_show_id: Optional[str] = None
+    pinned: Optional[bool] = False
+    total_quantity_override: Optional[int] = None  # used when sorting_system is blank
 
 
 class CostumeCreate(CostumeBase):
@@ -181,6 +184,9 @@ class CostumeUpdate(BaseModel):
     variant_label: Optional[str] = None
     in_use: Optional[bool] = None
     in_use_note: Optional[str] = None
+    current_show_id: Optional[str] = None
+    pinned: Optional[bool] = None
+    total_quantity_override: Optional[int] = None
 
 
 class FlagPayload(BaseModel):
@@ -221,7 +227,7 @@ class Costume(BaseModel):
     sub_location: str = ""
     notes: str = ""
     note_image_ids: List[str] = Field(default_factory=list)
-    sorting_system: str = "Letter"
+    sorting_system: str = ""
     sizes: Dict[str, int]
     size_notes: Dict[str, str] = Field(default_factory=dict)
     keywords: List[str] = Field(default_factory=list)
@@ -238,6 +244,8 @@ class Costume(BaseModel):
     in_use: bool = False
     in_use_note: str = ""
     in_use_since: Optional[str] = None
+    current_show_id: Optional[str] = None
+    pinned: bool = False
     created_at: str
     updated_at: str
     group_id: Optional[str] = None
@@ -543,6 +551,24 @@ def _normalize_costume_shows(raw) -> List[Dict]:
     return out
 
 
+async def _enforce_current_show_cap(new_show_id: Optional[str], exclude_id: Optional[str] = None, cap: int = 2) -> None:
+    """Ensure there are no more than `cap` distinct current_show_ids among in-use costumes.
+    Raises HTTPException(409) if adding new_show_id would exceed the cap."""
+    if not new_show_id:
+        return
+    q = {"in_use": True, "current_show_id": {"$ne": None}}
+    if exclude_id:
+        q["id"] = {"$ne": exclude_id}
+    docs = await db.costumes.find(q, {"_id": 0, "current_show_id": 1}).to_list(2000)
+    distinct = {d.get("current_show_id") for d in docs if d.get("current_show_id")}
+    distinct.add(new_show_id)
+    if len(distinct) > cap:
+        raise HTTPException(
+            status_code=409,
+            detail=f"You can only have {cap} shows actively running at once. Clear a current show first."
+        )
+
+
 @api_router.post("/costumes", response_model=Costume)
 async def create_costume(payload: CostumeCreate):
     now = _now_iso()
@@ -551,8 +577,17 @@ async def create_costume(payload: CostumeCreate):
     keywords = [k.strip() for k in (payload.keywords or []) if k and k.strip()]
     shows_list = _normalize_costume_shows(payload.shows)
     origin_year = await _resolve_origin_year_from_shows(shows_list)
-    # sorting_system with legacy alias fallback
-    sorting_system = (payload.sorting_system or payload.sizing_system or "Letter").strip()
+    # sorting_system with legacy alias fallback; blank means "no sorting system → single total"
+    sorting_system = (payload.sorting_system if payload.sorting_system is not None
+                      else (payload.sizing_system if payload.sizing_system is not None else "")).strip()
+    # Compute total_quantity: if a sorting system is set, sum sizes; otherwise use override or 0
+    if sorting_system:
+        total_qty = _compute_total(sizes)
+    else:
+        total_qty = int(payload.total_quantity_override or 0)
+    current_show_id = payload.current_show_id if (payload.in_use and payload.current_show_id) else None
+    if current_show_id:
+        await _enforce_current_show_cap(current_show_id)
     # Normalize flags list
     flags = []
     for f in (payload.flags or []):
@@ -586,7 +621,7 @@ async def create_costume(payload: CostumeCreate):
         "buy_link": (payload.buy_link or "").strip(),
         "shows": shows_list,
         "origin_year": origin_year,
-        "total_quantity": _compute_total(sizes),
+        "total_quantity": total_qty,
         "image_id": payload.image_id,
         "is_flagged": is_flagged,
         "flag_reason": flag_reason,
@@ -595,6 +630,8 @@ async def create_costume(payload: CostumeCreate):
         "in_use": bool(payload.in_use),
         "in_use_note": (payload.in_use_note or "").strip() if payload.in_use else "",
         "in_use_since": now if payload.in_use else None,
+        "current_show_id": current_show_id,
+        "pinned": bool(payload.pinned),
         "group_id": payload.group_id,
         "variant_label": (payload.variant_label or "").strip(),
         "created_at": now,
@@ -614,7 +651,28 @@ async def update_costume(costume_id: str, payload: CostumeUpdate):
     if "sizes" in updates:
         sizes = {str(k): int(v or 0) for k, v in (updates["sizes"] or {}).items()}
         updates["sizes"] = sizes
-        updates["total_quantity"] = _compute_total(sizes)
+        # only auto-compute total when a sorting system is (still) in effect
+        eff_sys = updates.get("sorting_system", existing.get("sorting_system", ""))
+        if eff_sys:
+            updates["total_quantity"] = _compute_total(sizes)
+    if "total_quantity_override" in updates:
+        # explicit total override — used when there's no sorting system
+        override = int(updates.pop("total_quantity_override") or 0)
+        eff_sys = updates.get("sorting_system", existing.get("sorting_system", ""))
+        if not eff_sys:
+            updates["total_quantity"] = override
+    if "sorting_system" in updates and not updates["sorting_system"]:
+        # switching to no-sorting-system: clear sizes
+        updates["sizes"] = {}
+        updates["size_notes"] = {}
+    if "current_show_id" in updates:
+        # enforce cap
+        cs = updates["current_show_id"]
+        in_use_effective = updates.get("in_use", existing.get("in_use", False))
+        if cs and in_use_effective:
+            await _enforce_current_show_cap(cs, exclude_id=costume_id)
+        else:
+            updates["current_show_id"] = None
     if "size_notes" in updates:
         updates["size_notes"] = {str(k): str(v or "") for k, v in (updates["size_notes"] or {}).items()}
     if "keywords" in updates:
@@ -664,6 +722,7 @@ async def update_costume(costume_id: str, payload: CostumeUpdate):
                 updates["in_use_since"] = _now_iso()
         else:
             updates["in_use_since"] = None
+            updates["current_show_id"] = None
             if "in_use_note" not in updates:
                 updates["in_use_note"] = ""
     if "note_image_ids" in updates:
@@ -1337,6 +1396,7 @@ async def get_settings():
             "logo_image_id": None,
             "default_view": "grid",
             "show_flag_banner": True,
+            "hide_in_use_mode": "full",
         }
         await db.settings.insert_one(doc)
         doc.pop("_id", None)
@@ -1344,6 +1404,7 @@ async def get_settings():
     doc.setdefault("logo_image_id", None)
     doc.setdefault("default_view", "grid")
     doc.setdefault("show_flag_banner", True)
+    doc.setdefault("hide_in_use_mode", "full")
     return doc
 
 
@@ -1352,6 +1413,7 @@ class SettingsUpdate(BaseModel):
     logo_image_id: Optional[str] = None
     default_view: Optional[str] = None
     show_flag_banner: Optional[bool] = None
+    hide_in_use_mode: Optional[str] = None
 
 
 @api_router.put("/settings")
@@ -1359,11 +1421,19 @@ async def update_settings(payload: SettingsUpdate):
     updates = {k: v for k, v in payload.model_dump(exclude_none=True).items()}
     if "default_view" in updates and updates["default_view"] not in ("grid", "list"):
         raise HTTPException(status_code=400, detail="default_view must be 'grid' or 'list'")
+    if "hide_in_use_mode" in updates and updates["hide_in_use_mode"] not in ("full", "hide_marker", "hide_all"):
+        raise HTTPException(status_code=400, detail="hide_in_use_mode must be 'full', 'hide_marker', or 'hide_all'")
     if "logo_image_id" in updates and updates["logo_image_id"] == "":
         updates["logo_image_id"] = None
     await db.settings.update_one({"id": "app"}, {"$set": updates}, upsert=True)
     doc = await db.settings.find_one({"id": "app"}, {"_id": 0})
     return doc
+
+
+@api_router.get("/pinned", response_model=List[Costume])
+async def list_pinned():
+    docs = await db.costumes.find({"pinned": True}, {"_id": 0}).sort("updated_at", -1).to_list(50)
+    return docs
 
 
 @api_router.get("/flagged", response_model=List[Costume])

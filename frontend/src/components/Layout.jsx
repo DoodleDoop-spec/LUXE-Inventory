@@ -1,6 +1,6 @@
 import { Outlet, NavLink, Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect, useRef } from "react";
-import { api } from "@/lib/api";
+import { useSettings } from "@/context/SettingsContext";
 import { LayoutDashboard, Package, MapPin, Settings as SettingsIcon, Search, X, Film, Flag, Menu, Wrench } from "lucide-react";
 
 const navItems = [
@@ -17,24 +17,10 @@ export default function Layout() {
   const location = useLocation();
   const navigate = useNavigate();
   const [globalQ, setGlobalQ] = useState("");
-  const [settings, setSettings] = useState({ org_name: "LUXE", logo_image_id: null });
+  const { settings } = useSettings();
   const [searchOpen, setSearchOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const searchInputRef = useRef(null);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const r = await api.get("/settings");
-        setSettings(r.data);
-      } catch { /* ignore */ }
-    })();
-    const onFocus = async () => {
-      try { const r = await api.get("/settings"); setSettings(r.data); } catch { /* ignore */ }
-    };
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, []);
 
   useEffect(() => {
     if (location.pathname === "/inventory") {

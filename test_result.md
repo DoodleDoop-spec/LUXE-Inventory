@@ -321,3 +321,182 @@ agent_communication:
         5. ✅ Categories enrichment: All new fields (image_id, location, sub_location, notes, keywords, creator) working on both Category and Subcategory, partial updates (notes-only) working correctly
         
         All backend APIs are functioning correctly. No errors or failures detected.
+
+## Iteration 11 — Jul 2026 (bug fixes + features)
+
+user_problem_statement_iter11: |
+  - Costume form: creating an inline subcategory wipes other fields; new sub also not auto-selected. Fix.
+  - Sorting system should be optional; when none, a single Total Quantity input.
+  - Replace all window.confirm() with in-page AlertDialog.
+  - "Currently in use" can also set a current show; max 2 active shows at a time; show gets a LIVE indicator.
+  - Ability to edit an existing show.
+  - Prominent "remove costume from show" button.
+  - Tab the Settings page (General / Storage / Categories / Sorting / Shows / Maintenance).
+  - Fix show_flag_banner setting; add 3-mode "hide currently in-use" visibility (full / hide markers / hide all with "Don't spoil the surprise!").
+  - Pinned costumes on dashboard (up to 8; fallback to recent); toggle in costume form.
+  - Company name/logo update live without refresh.
+  - Categories on Inventory: collapsible accordion sections grouping costumes.
+
+backend_tasks_iter11:
+  - task: "Costume: add pinned, current_show_id, total_quantity_override; enforce max 2 active shows; make sorting_system optional (blank allowed)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Model now has `pinned: bool`, `current_show_id: Optional[str]`. CostumeCreate accepts `total_quantity_override` for when there's no sorting system. create_costume computes total_quantity from sizes when a sorting_system is set, else uses the override. update_costume respects override + clears sizes when sorting_system is switched to blank. _enforce_current_show_cap(new_show_id, exclude_id, cap=2) raises 409 if activating a 3rd distinct show. Turning off `in_use` also clears `current_show_id`.
+      - working: true
+        agent: "testing"
+        comment: |
+          TESTED: All features working correctly. (1) Optional sorting_system: POST costume with sorting_system="" and total_quantity_override=12 → response has sorting_system="", total_quantity=12, sizes={}. UPDATE costume from sorting_system="Letter" to "" with total_quantity_override=25 → sizes and size_notes cleared to {}, total_quantity=25. UPDATE back to sorting_system="Letter" with sizes={"M":3} → total_quantity auto-computed to 3. (2) Pinned field: POST costume with pinned=true → response.pinned=true. (3) Max 2 active shows: Created 4 shows (A, B, C, D). POST Costume1 with in_use=true, current_show_id=A → success. POST Costume2 with show B → success (2 distinct). POST Costume3 with show C → 409 "You can only have 2 shows actively running at once". POST Costume4 with show A (same as Costume1) → success (still 2 distinct). PUT Costume1 with in_use=false → current_show_id cleared to None. PUT Costume4 with in_use=false → current_show_id cleared. POST Costume5 with show C → success (now B, C active). POST Costume6 with show D → 409 (would be 3rd). All 13 test cases passed.
+
+  - task: "Settings: add hide_in_use_mode ('full'|'hide_marker'|'hide_all')"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          SettingsUpdate/GET/PUT accept hide_in_use_mode. Only the 3 valid strings are allowed; validation returns 400 otherwise. Default is "full".
+      - working: true
+        agent: "testing"
+        comment: |
+          TESTED: All validation and persistence working correctly. (1) PUT /api/settings with hide_in_use_mode="hide_all" → 200, GET reflects value. (2) PUT with hide_in_use_mode="bogus" → 400 with message "hide_in_use_mode must be 'full', 'hide_marker', or 'hide_all'". (3) PUT with org_name="MyGroup" (no hide_in_use_mode field) → 200, hide_in_use_mode preserved as "hide_all". (4) PUT with hide_in_use_mode="hide_marker" → 200, value updated. (5) PUT with hide_in_use_mode="full" → 200, value updated. All 6 test cases passed.
+
+  - task: "New endpoint GET /api/pinned returning list of pinned costumes"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Returns costumes with pinned=true, sorted by updated_at desc, limit 50.
+      - working: true
+        agent: "testing"
+        comment: |
+          TESTED: Endpoint working correctly. (1) POST costume with pinned=true → response.pinned=true. (2) GET /api/pinned → returns the pinned costume in list. (3) PUT costume with pinned=false → response.pinned=false. (4) GET /api/pinned → no longer includes the costume. All 2 test cases passed.
+
+frontend_tasks_iter11:
+  - task: "Fix costume form state resets from prop refetches (subcategory/show/sorting inline creation no longer wipes other fields)"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/components/CostumeFormDialog.jsx"
+    needs_retesting: false
+  - task: "Sorting system optional in form (None → single Total Quantity input)"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/components/CostumeFormDialog.jsx"
+    needs_retesting: false
+  - task: "In-page ConfirmDialog + provider; replace window.confirm across pages"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/components/ConfirmDialog.jsx + multiple pages"
+    needs_retesting: false
+  - task: "Current show on in-use costumes; LIVE indicator on Shows list"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/components/CostumeFormDialog.jsx, Shows.jsx, Dashboard.jsx"
+    needs_retesting: false
+  - task: "Edit-existing-show dialog + delete on ShowDetail"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/pages/ShowDetail.jsx"
+    needs_retesting: false
+  - task: "Prominent remove-costume-from-show button"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/pages/ShowDetail.jsx"
+    needs_retesting: false
+  - task: "Tab-based Settings page; 3-way hide_in_use_mode UI; show_flag_banner honored on Dashboard"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/pages/Settings.jsx, Dashboard.jsx"
+    needs_retesting: false
+  - task: "Pinned costumes replace 'recently used' on Dashboard when >0; pin toggle in costume form"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/pages/Dashboard.jsx, CostumeFormDialog.jsx"
+    needs_retesting: false
+  - task: "Live-updating org name + logo via SettingsContext (no refresh needed)"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/context/SettingsContext.jsx, Layout.jsx, Settings.jsx"
+    needs_retesting: false
+  - task: "Inventory: collapsible category accordion grouping costumes"
+    implemented: true
+    working: "NA"
+    file: "frontend/src/pages/Inventory.jsx"
+    needs_retesting: false
+
+test_plan_iter11:
+  current_focus:
+    - "Costume: add pinned, current_show_id, total_quantity_override; enforce max 2 active shows; make sorting_system optional (blank allowed)"
+    - "Settings: add hide_in_use_mode ('full'|'hide_marker'|'hide_all')"
+    - "New endpoint GET /api/pinned returning list of pinned costumes"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication_iter11:
+  - agent: "main"
+    message: |
+      Iteration 11 backend changes. Please verify:
+
+      1) POST /api/costumes with `sorting_system` blank (or omitted) — should be accepted; sizes={} allowed. If `total_quantity_override` is provided, that value is stored as `total_quantity`. If no override, total_quantity=0. `sorting_system` in the response should be "" (empty string).
+
+      2) POST /api/costumes with `pinned: true` — response has pinned=true. GET /api/pinned returns it. Update it to pinned=false via PUT /api/costumes/{id} → GET /api/pinned no longer includes it.
+
+      3) POST /api/costumes with `in_use: true` and `current_show_id: <show_id>` — response has current_show_id set. Now try to create a second costume with in_use=true + a different current_show_id — should succeed (2 distinct shows). Try a third with yet another new show — should FAIL with 409 "You can only have 2 shows actively running at once". Setting the same show_id as one already active for a new costume must still work.
+
+      4) PUT /api/costumes/{id} with in_use=false → response has current_show_id=null.
+
+      5) PUT /api/settings with hide_in_use_mode="hide_all" — succeeds; GET reflects. hide_in_use_mode="bogus" → 400.
+
+      6) PUT /api/settings with hide_in_use_mode omitted — other fields still update normally.
+
+      7) PUT /api/costumes/{id} with sorting_system="" — clears sizes/size_notes on the costume. total_quantity should honor a provided total_quantity_override.
+
+      Please DO NOT test frontend. No auth. Empty DB is fine — testing should create the shows/costumes needed within the test.
+  - agent: "testing"
+    message: |
+      ✅ ALL ITERATION 11 BACKEND TESTS PASSED (21/21)
+      
+      Completed comprehensive end-to-end testing of all 3 backend tasks:
+      
+      1. ✅ Optional sorting system + total override (3 tests):
+         - POST costume with sorting_system="" and total_quantity_override=12 → correct response
+         - UPDATE costume from sorting_system to blank → sizes/size_notes cleared, total_quantity from override
+         - UPDATE costume back to sorting_system → total_quantity auto-computed from sizes
+      
+      2. ✅ Pinned costumes + /api/pinned endpoint (4 tests):
+         - POST costume with pinned=true → response.pinned=true
+         - GET /api/pinned → returns pinned costume
+         - UPDATE costume to pinned=false → response.pinned=false
+         - GET /api/pinned → excludes unpinned costume
+      
+      3. ✅ Max 2 active shows enforcement (8 tests):
+         - Created 4 test shows (A, B, C, D)
+         - POST Costume1 with show A → success
+         - POST Costume2 with show B → success (2 distinct)
+         - POST Costume3 with show C → 409 "You can only have 2 shows actively running at once"
+         - POST Costume4 with show A (duplicate) → success (still 2 distinct)
+         - UPDATE Costume1 to in_use=false → current_show_id cleared to None
+         - UPDATE Costume4 to in_use=false → current_show_id cleared
+         - POST Costume5 with show C → success (now B, C active)
+         - POST Costume6 with show D → 409 (would be 3rd distinct)
+      
+      4. ✅ hide_in_use_mode setting (6 tests):
+         - PUT with hide_in_use_mode="hide_all" → 200, GET reflects value
+         - PUT with hide_in_use_mode="bogus" → 400 with validation message
+         - PUT with org_name only → 200, hide_in_use_mode preserved
+         - PUT with hide_in_use_mode="hide_marker" → 200, value updated
+         - PUT with hide_in_use_mode="full" → 200, value updated
+      
+      All backend APIs are functioning correctly. No errors or failures detected.

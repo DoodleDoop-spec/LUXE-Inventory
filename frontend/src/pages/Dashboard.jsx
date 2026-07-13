@@ -1,46 +1,64 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
-import { Package, Tag, ArrowUpRight, Plus, Flag, Sparkles, Film, MapPin, Wrench, Boxes } from "lucide-react";
+import { useSettings } from "@/context/SettingsContext";
+import { Package, Tag, ArrowUpRight, Plus, Flag, Sparkles, Film, MapPin, Wrench, Boxes, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [recent, setRecent] = useState([]);
+  const [pinned, setPinned] = useState([]);
   const [flagged, setFlagged] = useState([]);
   const [inUse, setInUse] = useState([]);
-  const [orgName, setOrgName] = useState("LUXE");
+  const [showsById, setShowsById] = useState({});
+  const { settings } = useSettings();
+  const orgName = (settings.org_name || "LUXE").trim() || "LUXE";
+  const hideInUseMode = settings.hide_in_use_mode || "full";
+  const showFlagBanner = settings.show_flag_banner !== false;
   const navigate = useNavigate();
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const [s, r, f, iu, settings] = await Promise.all([
-          api.get("/stats"),
-          api.get("/costumes", { params: { sort: "origin_year_desc" } }),
-          api.get("/flagged"),
-          api.get("/in-use"),
-          api.get("/settings"),
-        ]);
-        setStats(s.data);
-        setRecent(r.data.slice(0, 8));
-        setFlagged(f.data);
-        setInUse(iu.data);
-        setOrgName((settings.data.org_name || "LUXE").trim() || "LUXE");
-      } catch (e) { console.error(e); }
-    })();
-  }, []);
+  const load = async () => {
+    try {
+      const [s, r, p, f, iu, sh] = await Promise.all([
+        api.get("/stats"),
+        api.get("/costumes", { params: { sort: "origin_year_desc" } }),
+        api.get("/pinned"),
+        api.get("/flagged"),
+        api.get("/in-use"),
+        api.get("/shows"),
+      ]);
+      setStats(s.data);
+      setRecent(r.data.slice(0, 8));
+      setPinned(p.data);
+      setFlagged(f.data);
+      setInUse(iu.data);
+      const m = {};
+      for (const x of sh.data) m[x.id] = x;
+      setShowsById(m);
+    } catch (e) { console.error(e); }
+  };
+
+  useEffect(() => { load(); }, []);
 
   const tiles = [
     { label: "Total Pieces", value: stats?.total_costumes ?? "—", icon: Package, testId: "stat-total-costumes", to: "/inventory" },
     { label: "Total Quantity", value: stats?.total_items ?? "—", icon: Boxes, testId: "stat-total-quantity", to: "/inventory" },
     { label: "Equipment", value: stats?.equipment_count ?? 0, icon: Wrench, testId: "stat-equipment", to: "/equipment" },
-    { label: "In Use", value: stats?.in_use_count ?? 0, icon: Sparkles, testId: "stat-in-use", accent: (stats?.in_use_count || 0) > 0, to: "/inventory" },
+    { label: "In Use", value: stats?.in_use_count ?? 0, icon: Sparkles, testId: "stat-in-use", accent: (stats?.in_use_count || 0) > 0 && hideInUseMode !== "hide_all", to: "/inventory", hidden: hideInUseMode === "hide_all" },
     { label: "Categories", value: stats?.category_count ?? "—", icon: Tag, testId: "stat-categories", to: "/settings" },
     { label: "Storage Locations", value: stats?.total_locations ?? "—", icon: MapPin, testId: "stat-locations", to: "/locations" },
     { label: "Shows", value: stats?.total_shows ?? "—", icon: Film, testId: "stat-shows", to: "/shows" },
     { label: "Flagged", value: stats?.flagged_count ?? 0, icon: Flag, testId: "stat-flagged", danger: (stats?.flagged_count || 0) > 0, to: "/flags" },
-  ];
+  ].filter((t) => !t.hidden);
+
+  // Featured section: pinned costumes when any exist, else recent
+  const featured = pinned.length > 0 ? pinned.slice(0, 8) : recent;
+  const featuredHeading = pinned.length > 0 ? "Pinned costumes" : "Most recently used";
+  const featuredEyebrow = pinned.length > 0 ? "PINNED" : "MOST RECENTLY USED";
+
+  const showInUseSection = hideInUseMode !== "hide_all" && inUse.length > 0;
+  const showInUseMarkers = hideInUseMode === "full";
 
   return (
     <div className="space-y-12" data-testid="dashboard-page">
@@ -100,7 +118,17 @@ export default function Dashboard() {
         ))}
       </section>
 
-      {inUse.length > 0 && (
+      {hideInUseMode === "hide_all" && inUse.length > 0 && (
+        <section data-testid="in-use-hidden" className="border border-[#E4E4E7] bg-[#FAFAFA] p-6 flex items-center gap-3">
+          <Lock className="h-5 w-5 text-[#71717A]" />
+          <div>
+            <div className="eyebrow text-[#71717A]">CURRENTLY IN USE</div>
+            <p className="text-sm text-[#27272A] mt-1 italic">Don&apos;t spoil the surprise! 🤫</p>
+          </div>
+        </section>
+      )}
+
+      {showInUseSection && (
         <section data-testid="in-use-section" className="border border-[#10B981] bg-[#ECFDF5]">
           <div className="p-5 md:p-6 border-b border-[#6EE7B7] flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -114,34 +142,39 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="divide-y divide-[#6EE7B7]">
-            {inUse.map((c) => (
-              <Link
-                key={c.id}
-                to={`/costume/${c.id}`}
-                data-testid={`in-use-${c.id}`}
-                className="flex items-center gap-4 px-5 md:px-6 py-3 hover:bg-[#D1FAE5]"
-              >
-                <div className="w-10 h-10 image-empty overflow-hidden border border-[#6EE7B7] shrink-0 flex items-center justify-center">
-                  {c.image_id ? (
-                    <img src={`${process.env.REACT_APP_BACKEND_URL}/api/images/${c.image_id}`} alt={c.name} className="w-full h-full object-cover" />
-                  ) : (
-                    <Sparkles className="h-4 w-4 text-[#10B981]" />
-                  )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="font-medium text-[#064E3B] truncate">{c.name}</div>
-                  <div className="text-xs text-[#065F46] truncate">{c.in_use_note || `${c.category}${c.subcategory ? ` · ${c.subcategory}` : ""}`}</div>
-                </div>
-                <div className="text-xs text-[#065F46] shrink-0 hidden sm:block tabular-nums">
-                  {c.in_use_since ? new Date(c.in_use_since).toLocaleDateString() : ""}
-                </div>
-              </Link>
-            ))}
+            {inUse.map((c) => {
+              const cs = c.current_show_id ? showsById[c.current_show_id] : null;
+              return (
+                <Link
+                  key={c.id}
+                  to={`/costume/${c.id}`}
+                  data-testid={`in-use-${c.id}`}
+                  className="flex items-center gap-4 px-5 md:px-6 py-3 hover:bg-[#D1FAE5]"
+                >
+                  <div className="w-10 h-10 image-empty overflow-hidden border border-[#6EE7B7] shrink-0 flex items-center justify-center">
+                    {c.image_id ? (
+                      <img src={`${process.env.REACT_APP_BACKEND_URL}/api/images/${c.image_id}`} alt={c.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <Sparkles className="h-4 w-4 text-[#10B981]" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium text-[#064E3B] truncate">{c.name}</div>
+                    <div className="text-xs text-[#065F46] truncate">
+                      {cs ? `🎭 ${cs.name}${cs.year ? ` (${cs.year})` : ""}` : (c.in_use_note || `${c.category}${c.subcategory ? ` · ${c.subcategory}` : ""}`)}
+                    </div>
+                  </div>
+                  <div className="text-xs text-[#065F46] shrink-0 hidden sm:block tabular-nums">
+                    {c.in_use_since ? new Date(c.in_use_since).toLocaleDateString() : ""}
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         </section>
       )}
 
-      {flagged.length > 0 && (
+      {showFlagBanner && flagged.length > 0 && (
         <section data-testid="flagged-section" className="border border-[#EF4444] bg-[#FEF2F2]">
           <div className="p-5 md:p-6 border-b border-[#FCA5A5] flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -175,19 +208,19 @@ export default function Dashboard() {
         </section>
       )}
 
-      <section className="space-y-6">
+      <section className="space-y-6" data-testid="featured-section">
         <div className="flex items-end justify-between">
           <div>
-            <div className="eyebrow">MOST RECENTLY USED</div>
+            <div className="eyebrow">{featuredEyebrow}</div>
             <h2 className="font-display text-2xl sm:text-3xl tracking-tight font-semibold text-[#09090B] mt-2">
-              Most recently used
+              {featuredHeading}
             </h2>
           </div>
           <Link to="/inventory" className="text-sm font-medium text-[#09090B] hover:underline" data-testid="link-view-all">
             View all →
           </Link>
         </div>
-        {recent.length === 0 ? (
+        {featured.length === 0 ? (
           <div className="border border-[#E4E4E7] p-10 text-center">
             <p className="text-[#71717A] mb-4">No costumes yet. Get started by adding your first costume.</p>
             <Link to="/inventory?new=1">
@@ -197,8 +230,8 @@ export default function Dashboard() {
             </Link>
           </div>
         ) : (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-px bg-[#E4E4E7] border border-[#E4E4E7]" style={{ gridTemplateColumns: recent.length < 4 ? `repeat(${Math.max(recent.length, 1)}, minmax(0, 1fr))` : undefined }}>
-            {recent.map((c) => (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-px bg-[#E4E4E7] border border-[#E4E4E7]" style={{ gridTemplateColumns: featured.length < 4 ? `repeat(${Math.max(featured.length, 1)}, minmax(0, 1fr))` : undefined }}>
+            {featured.map((c) => (
               <Link
                 key={c.id}
                 to={`/costume/${c.id}`}
@@ -212,6 +245,16 @@ export default function Dashboard() {
                   {c.is_flagged && (
                     <div className="absolute top-2 right-2 bg-[#EF4444] text-white p-1">
                       <Flag className="h-3 w-3" fill="currentColor" />
+                    </div>
+                  )}
+                  {c.pinned && (
+                    <div className="absolute top-2 left-2 bg-[#F59E0B] text-white p-1" title="Pinned">
+                      <Sparkles className="h-3 w-3" fill="currentColor" />
+                    </div>
+                  )}
+                  {showInUseMarkers && c.in_use && (
+                    <div className="absolute bottom-2 left-2 right-2 bg-[#10B981]/90 text-white text-[10px] font-mono-label tracking-widest text-center py-0.5">
+                      IN USE
                     </div>
                   )}
                 </div>

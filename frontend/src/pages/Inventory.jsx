@@ -1,7 +1,8 @@
 import { useEffect, useState, useMemo } from "react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { api } from "@/lib/api";
-import { Plus, Search, LayoutGrid, List, X, MapPin, ChevronRight, Flag, StickyNote, SlidersHorizontal, ArrowUpDown, Calendar, Image as ImageIcon, Package, Tag as TagIcon, Sparkles } from "lucide-react";
+import { useConfirm } from "@/components/ConfirmDialog";
+import { Plus, Search, LayoutGrid, List, X, MapPin, ChevronRight, ChevronDown, Flag, StickyNote, SlidersHorizontal, ArrowUpDown, Calendar, Image as ImageIcon, Package, Tag as TagIcon, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -37,6 +38,7 @@ function subcategoryPathOptions(subs) {
 export default function Inventory() {
   const location = useLocation();
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const [costumes, setCostumes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState([]);
@@ -44,6 +46,7 @@ export default function Inventory() {
   const [sizingSystems, setSizingSystems] = useState([]);
   const [shows, setShows] = useState([]);
   const [groups, setGroups] = useState([]);
+  const [collapsedCategories, setCollapsedCategories] = useState({});
   const [q, setQ] = useState("");
   const [category, setCategory] = useState(ALL);
   const [subcategory, setSubcategory] = useState(ALL);
@@ -141,8 +144,14 @@ export default function Inventory() {
   const handleNew = () => { setEditing(null); setDialogOpen(true); };
   const handleEdit = (c) => { setEditing(c); setDialogOpen(true); };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm("Delete this costume? This cannot be undone.")) return;
+  const handleDelete = async (id, name) => {
+    const ok = await confirm({
+      title: `Delete "${name || "this costume"}"?`,
+      description: "This cannot be undone. The costume's photos and notes will be gone.",
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await api.delete(`/costumes/${id}`);
       toast.success("Costume deleted");
@@ -435,22 +444,63 @@ export default function Inventory() {
           )}
         </div>
       ) : view === "grid" ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-px bg-[#E4E4E7] border border-[#E4E4E7]">
-          {costumes.map((c) => (
-            <CostumeCard
-              key={c.id}
-              costume={c}
-              onEdit={handleEdit}
-              onDelete={handleDelete}
-              sizingSystems={sizingSystems}
-              showsById={showsById}
-              categories={categories}
-              onDragStart={() => setDragging(c)}
-              onDragEnd={() => { setDragging(null); setDragOverTarget(null); }}
-              isDragging={dragging?.id === c.id}
-            />
-          ))}
-        </div>
+        (() => {
+          // Group costumes by category (accordion style)
+          const groupsByCat = new Map();
+          for (const c of costumes) {
+            const key = c.category || "Uncategorized";
+            if (!groupsByCat.has(key)) groupsByCat.set(key, []);
+            groupsByCat.get(key).push(c);
+          }
+          const entries = Array.from(groupsByCat.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+          return (
+            <div className="space-y-4" data-testid="inventory-categories">
+              {entries.map(([catName, items]) => {
+                const catMeta = (categories || []).find((c) => c.name === catName);
+                const color = catMeta?.color || "#71717A";
+                const isCollapsed = !!collapsedCategories[catName];
+                return (
+                  <section key={catName} data-testid={`inv-cat-${catName}`} className="border border-[#E4E4E7]">
+                    <button
+                      type="button"
+                      data-testid={`inv-cat-toggle-${catName}`}
+                      onClick={() => setCollapsedCategories((prev) => ({ ...prev, [catName]: !prev[catName] }))}
+                      onDragOver={(e) => { e.preventDefault(); setDragOverTarget(`cat:${catName}`); }}
+                      onDragLeave={() => setDragOverTarget(null)}
+                      onDrop={(e) => { e.preventDefault(); handleDropOnCategory(catName); setDragOverTarget(null); }}
+                      className={`w-full flex items-center gap-3 p-4 md:p-5 hover:bg-[#FAFAFA] transition-colors ${
+                        dragOverTarget === `cat:${catName}` ? "bg-[#F4F4F5] outline outline-2 outline-[#09090B]" : ""
+                      }`}
+                    >
+                      {isCollapsed ? <ChevronRight className="h-5 w-5 text-[#09090B]" /> : <ChevronDown className="h-5 w-5 text-[#09090B]" />}
+                      <div className="w-3 h-3 shrink-0" style={{ backgroundColor: color }} />
+                      <span className="font-display text-lg font-semibold text-[#09090B]">{catName}</span>
+                      <span className="text-xs text-[#71717A] tabular-nums">{items.length} {items.length === 1 ? "piece" : "pieces"} · {items.reduce((a, c) => a + (c.total_quantity || 0), 0)} units</span>
+                    </button>
+                    {!isCollapsed && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-px bg-[#E4E4E7] border-t border-[#E4E4E7]">
+                        {items.map((c) => (
+                          <CostumeCard
+                            key={c.id}
+                            costume={c}
+                            onEdit={handleEdit}
+                            onDelete={handleDelete}
+                            sizingSystems={sizingSystems}
+                            showsById={showsById}
+                            categories={categories}
+                            onDragStart={() => setDragging(c)}
+                            onDragEnd={() => { setDragging(null); setDragOverTarget(null); }}
+                            isDragging={dragging?.id === c.id}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                );
+              })}
+            </div>
+          );
+        })()
       ) : (
         <CostumeTable costumes={costumes} onEdit={handleEdit} onDelete={handleDelete} showsById={showsById} categories={categories} />
       )}
@@ -662,7 +712,7 @@ function CostumeCard({ costume, onEdit, onDelete, sizingSystems, showsById, cate
         <span className="text-[#E4E4E7]">|</span>
         <button
           data-testid={`delete-${costume.id}`}
-          onClick={() => onDelete(costume.id)}
+          onClick={() => onDelete(costume.id, costume.name)}
           className="text-xs font-medium text-[#EF4444] hover:underline"
         >
           Delete
@@ -742,7 +792,7 @@ function CostumeTable({ costumes, onEdit, onDelete, showsById, categories }) {
                 <td className="px-4 py-3 text-right font-semibold tabular-nums">{c.total_quantity}</td>
                 <td className="px-4 py-3 text-right whitespace-nowrap">
                   <button onClick={() => onEdit(c)} data-testid={`row-edit-${c.id}`} className="text-xs font-medium text-[#09090B] hover:underline mr-3">Edit</button>
-                  <button onClick={() => onDelete(c.id)} data-testid={`row-delete-${c.id}`} className="text-xs font-medium text-[#EF4444] hover:underline">Delete</button>
+                  <button onClick={() => onDelete(c.id, c.name)} data-testid={`row-delete-${c.id}`} className="text-xs font-medium text-[#EF4444] hover:underline">Delete</button>
                 </td>
               </tr>
             );

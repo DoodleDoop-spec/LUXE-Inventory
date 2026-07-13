@@ -1,9 +1,12 @@
 import { useEffect, useState, useMemo } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
-import { ArrowLeft, Film, Flag, Calendar, Plus, Search, X, ExternalLink } from "lucide-react";
+import { useConfirm } from "@/components/ConfirmDialog";
+import { ArrowLeft, Film, Flag, Calendar, Plus, Search, X, ExternalLink, Pencil, Upload, Image as ImageIcon, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
@@ -12,6 +15,7 @@ import { toast } from "sonner";
 export default function ShowDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const [show, setShow] = useState(null);
   const [costumes, setCostumes] = useState([]);
   const [allCostumes, setAllCostumes] = useState([]);
@@ -19,6 +23,10 @@ export default function ShowDetail() {
   const [pickerQ, setPickerQ] = useState("");
   const [pickerSelected, setPickerSelected] = useState({});
   const [pickerSaving, setPickerSaving] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editForm, setEditForm] = useState({ name: "", year: "", notes: "", show_link: "", image_id: null });
+  const [editSaving, setEditSaving] = useState(false);
+  const [editUploading, setEditUploading] = useState(false);
 
   const load = async () => {
     try {
@@ -107,7 +115,13 @@ export default function ShowDetail() {
   };
 
   const detachCostume = async (c) => {
-    if (!window.confirm(`Remove "${c.name}" from this show?`)) return;
+    const ok = await confirm({
+      title: `Remove "${c.name}" from ${show?.name || "this show"}?`,
+      description: "The costume itself stays in your inventory. This only unlinks it from this show.",
+      confirmLabel: "Remove",
+      danger: true,
+    });
+    if (!ok) return;
     const current = (c.shows && c.shows.length ? c.shows : (c.original_show_id ? [{ show_id: c.original_show_id, timestamp: "" }] : []).concat((c.additional_show_ids || []).map((sid) => ({ show_id: sid, timestamp: "" }))));
     const next = current.filter((s) => s.show_id !== id);
     try {
@@ -115,6 +129,80 @@ export default function ShowDetail() {
       toast.success("Removed from this show");
       load();
     } catch { toast.error("Failed to remove"); }
+  };
+
+  const openEdit = () => {
+    if (!show) return;
+    setEditForm({
+      name: show.name || "",
+      year: show.year != null ? String(show.year) : "",
+      notes: show.notes || "",
+      show_link: show.show_link || "",
+      image_id: show.image_id || null,
+    });
+    setEditOpen(true);
+  };
+
+  const uploadEditImage = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { toast.error("Please choose an image"); return; }
+    setEditUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await api.post("/upload", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      setEditForm((prev) => ({ ...prev, image_id: r.data.image_id }));
+      toast.success("Photo uploaded");
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Upload failed");
+    }
+    setEditUploading(false);
+    e.target.value = "";
+  };
+
+  const submitEdit = async (e) => {
+    e.preventDefault();
+    const name = editForm.name.trim();
+    if (!name) { toast.error("Show name required"); return; }
+    const year = editForm.year.trim() ? parseInt(editForm.year, 10) : null;
+    if (editForm.year.trim() && (isNaN(year) || year < 1800 || year > 2200)) {
+      toast.error("Year must be between 1800 and 2200"); return;
+    }
+    setEditSaving(true);
+    try {
+      await api.put(`/shows/${id}`, {
+        name,
+        year,
+        notes: editForm.notes.trim(),
+        show_link: editForm.show_link.trim(),
+        image_id: editForm.image_id,
+      });
+      toast.success("Show updated");
+      setEditOpen(false);
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to update");
+    }
+    setEditSaving(false);
+  };
+
+  const deleteShow = async () => {
+    if (!show) return;
+    const ok = await confirm({
+      title: `Delete "${show.name}"?`,
+      description: "This can only be done if no costumes are attached to this show.",
+      confirmLabel: "Delete show",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.delete(`/shows/${id}`);
+      toast.success("Show deleted");
+      navigate("/shows");
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to delete");
+    }
   };
 
   if (!show) return <div className="py-20 eyebrow">LOADING…</div>;
@@ -170,6 +258,24 @@ export default function ShowDetail() {
             >
               <Plus className="h-4 w-4 mr-1" /> Add costumes / accessories
             </Button>
+            <Button
+              type="button"
+              onClick={openEdit}
+              variant="outline"
+              data-testid="show-edit-btn"
+              className="rounded-none border-[#09090B] h-10"
+            >
+              <Pencil className="h-4 w-4 mr-1" /> Edit show
+            </Button>
+            <Button
+              type="button"
+              onClick={deleteShow}
+              variant="ghost"
+              data-testid="show-delete-btn"
+              className="rounded-none h-10 text-[#EF4444] hover:bg-[#FEF2F2]"
+            >
+              <Trash2 className="h-4 w-4 mr-1" /> Delete
+            </Button>
           </div>
           <div className="text-sm text-[#71717A] mt-4 tabular-nums">
             {originals.length} original · {additionals.length} additional · {costumes.length} total pieces
@@ -206,7 +312,7 @@ export default function ShowDetail() {
                     type="button"
                     data-testid={`show-detach-${c.id}`}
                     onClick={() => detachCostume(c)}
-                    className="absolute top-3 left-3 opacity-0 group-hover:opacity-100 transition-opacity bg-white/95 border border-[#E4E4E7] hover:border-[#EF4444] hover:text-[#EF4444] p-1"
+                    className="absolute top-3 left-3 bg-white/95 border border-[#E4E4E7] hover:border-[#EF4444] hover:text-[#EF4444] p-1.5 shadow-sm z-10"
                     aria-label="Remove from show"
                     title="Remove from this show"
                   >
@@ -304,6 +410,102 @@ export default function ShowDetail() {
               {pickerSaving ? "Attaching…" : `Attach ${Object.values(pickerSelected).filter(Boolean).length || ""}`.trim()}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit show dialog */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="max-w-lg rounded-none border-[#09090B]" data-testid="show-edit-dialog">
+          <DialogHeader>
+            <div className="eyebrow">EDIT / SHOW</div>
+            <DialogTitle className="font-display text-2xl tracking-tight">Edit show</DialogTitle>
+            <DialogDescription className="text-[#71717A]">
+              Update this show&apos;s details. Timestamps stay on each costume, not on the show.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={submitEdit} className="space-y-4 mt-2">
+            <div className="space-y-2">
+              <Label className="eyebrow">NAME</Label>
+              <Input
+                data-testid="show-edit-name"
+                value={editForm.name}
+                onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                placeholder="Show name"
+                className="rounded-none border-[#E4E4E7] h-11"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="eyebrow">YEAR</Label>
+              <Input
+                type="number"
+                min="1800"
+                max="2200"
+                data-testid="show-edit-year"
+                value={editForm.year}
+                onChange={(e) => setEditForm({ ...editForm, year: e.target.value })}
+                placeholder="e.g. 2024"
+                className="rounded-none border-[#E4E4E7] h-11"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="eyebrow">LINK TO WATCH (OPTIONAL)</Label>
+              <Input
+                type="url"
+                data-testid="show-edit-link"
+                value={editForm.show_link}
+                onChange={(e) => setEditForm({ ...editForm, show_link: e.target.value })}
+                placeholder="e.g. YouTube or Vimeo URL"
+                className="rounded-none border-[#E4E4E7] h-11"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="eyebrow">NOTES</Label>
+              <Textarea
+                data-testid="show-edit-notes"
+                value={editForm.notes}
+                onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                rows={2}
+                className="rounded-none border-[#E4E4E7]"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="eyebrow">COVER PHOTO</Label>
+              <div className="flex items-start gap-3">
+                <div className="w-20 h-20 image-empty border border-[#E4E4E7] overflow-hidden flex items-center justify-center shrink-0">
+                  {editForm.image_id ? (
+                    <img
+                      src={`${process.env.REACT_APP_BACKEND_URL}/api/images/${editForm.image_id}`}
+                      alt="Cover"
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <ImageIcon className="h-5 w-5 text-[#A1A1AA]" />
+                  )}
+                </div>
+                <div className="flex flex-col gap-2 flex-1">
+                  <input type="file" accept="image/*" onChange={uploadEditImage} className="hidden" id="show-edit-file" data-testid="show-edit-file" />
+                  <label htmlFor="show-edit-file" className="cursor-pointer inline-flex items-center gap-2 border border-[#09090B] text-[#09090B] hover:bg-[#F4F4F5] h-10 px-4 text-sm w-fit">
+                    <Upload className="h-4 w-4" /> {editUploading ? "Uploading…" : (editForm.image_id ? "Replace photo" : "Upload photo")}
+                  </label>
+                  {editForm.image_id && (
+                    <button
+                      type="button"
+                      onClick={() => setEditForm({ ...editForm, image_id: null })}
+                      className="text-xs text-[#EF4444] hover:underline w-fit"
+                    >
+                      Remove photo
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+            <DialogFooter className="gap-2">
+              <Button type="button" variant="outline" onClick={() => setEditOpen(false)} className="rounded-none h-11">Cancel</Button>
+              <Button type="submit" disabled={editSaving} data-testid="show-edit-save" className="bg-[#09090B] hover:bg-[#27272A] text-white rounded-none h-11 px-6">
+                {editSaving ? "Saving…" : "Save changes"}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>

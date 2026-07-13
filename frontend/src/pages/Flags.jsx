@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 const PRESET_COLORS = [
   "#EF4444", "#F97316", "#F59E0B", "#EAB308", "#84CC16",
@@ -14,6 +15,7 @@ const PRESET_COLORS = [
 ];
 
 export default function Flags() {
+  const confirm = useConfirm();
   const [categories, setCategories] = useState([]);
   const [costumesByFc, setCostumesByFc] = useState({});
   const [expanded, setExpanded] = useState({});
@@ -84,10 +86,11 @@ export default function Flags() {
 
   const removeCategory = async (fc) => {
     const count = costumesByFc[fc.id]?.length || 0;
-    const msg = count > 0
-      ? `Delete flag "${fc.name}"? It will be removed from ${count} costume(s).`
-      : `Delete flag "${fc.name}"?`;
-    if (!window.confirm(msg)) return;
+    const desc = count > 0
+      ? `It will be removed from ${count} costume${count === 1 ? "" : "s"}.`
+      : "This flag category has no costumes attached.";
+    const ok = await confirm({ title: `Delete flag "${fc.name}"?`, description: desc, confirmLabel: "Delete", danger: true });
+    if (!ok) return;
     try {
       await api.delete(`/flag-categories/${fc.id}`);
       toast.success("Flag deleted");

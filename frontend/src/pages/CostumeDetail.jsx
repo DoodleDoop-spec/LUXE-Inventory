@@ -5,6 +5,7 @@ import { ArrowLeft, MapPin, Pencil, Trash2, Flag, StickyNote, Calendar, Tag, Spa
 import { Button } from "@/components/ui/button";
 import CostumeFormDialog from "@/components/CostumeFormDialog";
 import { buildTimestampedUrl } from "@/lib/videoLink";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { toast } from "sonner";
 
 export default function CostumeDetail() {
@@ -17,6 +18,7 @@ export default function CostumeDetail() {
   const [shows, setShows] = useState([]);
   const [flagCategories, setFlagCategories] = useState([]);
   const [editOpen, setEditOpen] = useState(false);
+  const confirm = useConfirm();
 
   const fetchAll = async () => {
     try {
@@ -49,7 +51,13 @@ export default function CostumeDetail() {
   }, [shows]);
 
   const handleDelete = async () => {
-    if (!window.confirm("Delete this costume?")) return;
+    const ok = await confirm({
+      title: `Delete "${costume?.name || "this costume"}"?`,
+      description: "This will permanently remove the costume, its photos, and its notes.",
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!ok) return;
     await api.delete(`/costumes/${id}`);
     toast.success("Deleted");
     navigate("/inventory");

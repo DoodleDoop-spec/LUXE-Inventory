@@ -12,27 +12,33 @@ import ShowDetail from "@/pages/ShowDetail";
 import GroupDetail from "@/pages/GroupDetail";
 import Flags from "@/pages/Flags";
 import Equipment from "@/pages/Equipment";
+import { SettingsProvider } from "@/context/SettingsContext";
+import { ConfirmProvider } from "@/components/ConfirmDialog";
 
 function App() {
   return (
     <div className="App">
-      <BrowserRouter>
-        <Routes>
-          <Route element={<Layout />}>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/inventory" element={<Inventory />} />
-            <Route path="/equipment" element={<Equipment />} />
-            <Route path="/costume/:id" element={<CostumeDetail />} />
-            <Route path="/locations" element={<Locations />} />
-            <Route path="/shows" element={<Shows />} />
-            <Route path="/shows/:id" element={<ShowDetail />} />
-            <Route path="/group/:id" element={<GroupDetail />} />
-            <Route path="/flags" element={<Flags />} />
-            <Route path="/settings" element={<Settings />} />
-          </Route>
-        </Routes>
-      </BrowserRouter>
-      <Toaster position="top-right" richColors />
+      <SettingsProvider>
+        <ConfirmProvider>
+          <BrowserRouter>
+            <Routes>
+              <Route element={<Layout />}>
+                <Route path="/" element={<Dashboard />} />
+                <Route path="/inventory" element={<Inventory />} />
+                <Route path="/equipment" element={<Equipment />} />
+                <Route path="/costume/:id" element={<CostumeDetail />} />
+                <Route path="/locations" element={<Locations />} />
+                <Route path="/shows" element={<Shows />} />
+                <Route path="/shows/:id" element={<ShowDetail />} />
+                <Route path="/group/:id" element={<GroupDetail />} />
+                <Route path="/flags" element={<Flags />} />
+                <Route path="/settings" element={<Settings />} />
+              </Route>
+            </Routes>
+          </BrowserRouter>
+          <Toaster position="top-right" richColors />
+        </ConfirmProvider>
+      </SettingsProvider>
     </div>
   );
 }

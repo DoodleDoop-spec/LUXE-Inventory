@@ -49,6 +49,9 @@ export default function CostumeFormDialog({
   const [variantLabel, setVariantLabel] = useState("");
   const [inUse, setInUse] = useState(false);
   const [inUseNote, setInUseNote] = useState("");
+  const [currentShowId, setCurrentShowId] = useState("");
+  const [pinned, setPinned] = useState(false);
+  const [totalOverride, setTotalOverride] = useState(0);
   const [newSubcatName, setNewSubcatName] = useState("");
   const [newLocMode, setNewLocMode] = useState(false);
   const [newLocName, setNewLocName] = useState("");
@@ -117,7 +120,7 @@ export default function CostumeFormDialog({
       setCategory(editing.category || "");
       setNewCategory("");
       setSubcategoryPath([]);
-      setSystemName(editing.sorting_system || editing.sizing_system || "Letter");
+      setSystemName(editing.sorting_system ?? editing.sizing_system ?? "");
       // Try to reconstruct locPath from stored location path
       const match = (locations || []).find((l) => l.path === editing.location);
       if (match) {
@@ -140,6 +143,7 @@ export default function CostumeFormDialog({
       setNoteImageIds(editing.note_image_ids || []);
       setSizes(editing.sizes || {});
       setSizeNotes(editing.size_notes || {});
+      setTotalOverride(Number(editing.total_quantity || 0));
       setImageId(editing.image_id || null);
       setIsFlagged(!!editing.is_flagged);
       setFlagReason(editing.flag_reason || "");
@@ -163,14 +167,17 @@ export default function CostumeFormDialog({
       setVariantLabel(editing.variant_label || "");
       setInUse(!!editing.in_use);
       setInUseNote(editing.in_use_note || "");
+      setCurrentShowId(editing.current_show_id || "");
+      setPinned(!!editing.pinned);
     } else {
       setName(""); setCategory(""); setNewCategory("");
-      setSystemName("Letter");
+      setSystemName("");
       setLocMode("preset"); setLocPath([]); setSubLocation(""); setCustomLocation("");
       setNotes("");
       setNoteImageIds([]);
       setSizes({});
       setSizeNotes({});
+      setTotalOverride(0);
       setImageId(null);
       setIsFlagged(false);
       setFlagReason("");
@@ -184,6 +191,8 @@ export default function CostumeFormDialog({
       setVariantLabel("");
       setInUse(false);
       setInUseNote("");
+      setCurrentShowId("");
+      setPinned(false);
     }
     setNewSubcatName("");
     setNewLocMode(false);
@@ -198,7 +207,10 @@ export default function CostumeFormDialog({
     setSimilarCats([]);
     setOpenSizeNote(null);
     setKwInput("");
-  }, [open, editing, locations, locById]);
+    // IMPORTANT: only reset when open toggles or a different editing target is opened.
+    // Prop refetches (locations, categories) must NOT trigger a reset — that would wipe user input.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, editing?.id]);
 
   useEffect(() => {
     if (!sizeKeys.length) return;
@@ -212,11 +224,15 @@ export default function CostumeFormDialog({
       for (const k of sizeKeys) next[k] = prev?.[k] || "";
       return next;
     });
-  }, [systemName]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [systemName]);
 
   // Reconstruct subcategoryPath from editing.subcategory (string like "Formal / Long")
+  // Runs only when subcategoryPath is still empty (i.e. initial mount for an edit) to avoid
+  // clobbering user's in-progress selection after inline subcategory creation refreshes categories.
   useEffect(() => {
     if (!open || !editing?.subcategory || subcatNodes.length === 0) return;
+    if (subcategoryPath.length > 0) return;
     const parts = editing.subcategory.split(" / ").map((p) => p.trim());
     const ids = [];
     let parentId = null;
@@ -227,7 +243,8 @@ export default function CostumeFormDialog({
       parentId = match.id;
     }
     if (ids.length) setSubcategoryPath(ids);
-  }, [open, editing, subcatNodes]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, editing?.id, subcatNodes]);
 
   // Load flag categories when dialog opens
   useEffect(() => {
@@ -505,9 +522,10 @@ export default function CostumeFormDialog({
         sub_location: locMode === "preset" ? subLocation.trim() : "",
         notes: notes.trim(),
         note_image_ids: [...noteImageIds],
-        sorting_system: systemName,
-        sizes: Object.fromEntries(sizeKeys.map((s) => [s, Number(sizes[s]) || 0])),
-        size_notes: Object.fromEntries(sizeKeys.map((s) => [s, (sizeNotes[s] || "").trim()])),
+        sorting_system: systemName || "",
+        sizes: systemName ? Object.fromEntries(sizeKeys.map((s) => [s, Number(sizes[s]) || 0])) : {},
+        size_notes: systemName ? Object.fromEntries(sizeKeys.map((s) => [s, (sizeNotes[s] || "").trim()])) : {},
+        total_quantity_override: systemName ? undefined : Math.max(0, Number(totalOverride) || 0),
         keywords,
         creator: creator.trim(),
         buy_link: buyLink.trim(),
@@ -520,6 +538,8 @@ export default function CostumeFormDialog({
         variant_label: variantLabel.trim(),
         in_use: inUse,
         in_use_note: inUse ? inUseNote.trim() : "",
+        current_show_id: inUse && currentShowId ? currentShowId : null,
+        pinned: !!pinned,
       };
       if (editing) {
         await api.put(`/costumes/${editing.id}`, payload);
@@ -772,9 +792,10 @@ export default function CostumeFormDialog({
               <div className="flex items-center gap-3">
                 <Label className="eyebrow">SORTING SYSTEM</Label>
                 <Select
-                  value={systemName}
+                  value={systemName || "__none__"}
                   onValueChange={(v) => {
                     if (v === "__add_new__") { setAddingSortingSystem(true); return; }
+                    if (v === "__none__") { setSystemName(""); return; }
                     setSystemName(v);
                   }}
                 >
@@ -782,6 +803,7 @@ export default function CostumeFormDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="__none__">— None (single total) —</SelectItem>
                     {(sizingSystems || []).map((s) => (
                       <SelectItem key={s.id} value={s.name}>{s.name}</SelectItem>
                     ))}
@@ -790,7 +812,7 @@ export default function CostumeFormDialog({
                 </Select>
               </div>
               <div className="text-sm text-[#71717A]">
-                Total: <span className="font-semibold text-[#09090B] tabular-nums" data-testid="form-total">{total}</span>
+                Total: <span className="font-semibold text-[#09090B] tabular-nums" data-testid="form-total">{systemName ? total : (Number(totalOverride) || 0)}</span>
               </div>
             </div>
 
@@ -835,6 +857,20 @@ export default function CostumeFormDialog({
               </div>
             )}
 
+            {!systemName ? (
+              <div className="border border-[#E4E4E7] p-4 bg-white flex items-center gap-4 flex-wrap" data-testid="form-total-override">
+                <Label className="eyebrow">TOTAL QUANTITY</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  data-testid="form-total-input"
+                  value={totalOverride}
+                  onChange={(e) => setTotalOverride(Math.max(0, Number(e.target.value) || 0))}
+                  className="rounded-none border-[#E4E4E7] h-10 w-32 text-center tabular-nums"
+                />
+                <p className="text-xs text-[#A1A1AA]">Pick a sorting system above to break this down further (sizes, colors, etc.).</p>
+              </div>
+            ) : (
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-px bg-[#E4E4E7] border border-[#E4E4E7]">
               {sizeKeys.length === 0 ? (
                 <div className="bg-white p-4 col-span-full text-center text-sm text-[#71717A]">Select a sorting system.</div>
@@ -868,7 +904,8 @@ export default function CostumeFormDialog({
                 );
               })}
             </div>
-            {openSizeNote && (
+            )}
+            {openSizeNote && systemName && (
               <div className="border border-[#09090B] p-3 bg-[#FAFAFA]" data-testid={`size-note-panel-${openSizeNote}`}>
                 <div className="flex items-center justify-between mb-2">
                   <Label className="eyebrow">NOTE FOR SIZE {openSizeNote}</Label>
@@ -1268,11 +1305,53 @@ export default function CostumeFormDialog({
                   placeholder="Optional context (e.g. On stage for run of Hairspray, Feb 5–20)"
                   className="rounded-none border-[#E4E4E7]"
                 />
+                {costumeShows.length > 0 && (
+                  <div className="space-y-1">
+                    <Label className="eyebrow text-[10px]">CURRENT SHOW (OPTIONAL)</Label>
+                    <Select
+                      value={currentShowId || "__none__"}
+                      onValueChange={(v) => setCurrentShowId(v === "__none__" ? "" : v)}
+                    >
+                      <SelectTrigger data-testid="form-current-show" className="rounded-none border-[#E4E4E7] h-10">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">— No current show —</SelectItem>
+                        {costumeShows.map((cs) => {
+                          const sh = (shows || []).find((s) => s.id === cs.show_id);
+                          if (!sh) return null;
+                          return <SelectItem key={cs.show_id} value={cs.show_id}>{sh.name}{sh.year ? ` (${sh.year})` : ""}</SelectItem>;
+                        })}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[10px] text-[#A1A1AA] font-mono-label">
+                      MAX 2 SHOWS ACTIVE AT ONCE. TAGS THE SHOW WITH A GREEN &ldquo;LIVE&rdquo; INDICATOR.
+                    </p>
+                  </div>
+                )}
                 <p className="text-[10px] text-[#A1A1AA] font-mono-label">
                   ITEMS &ldquo;IN USE&rdquo; ARE HIGHLIGHTED ON THE DASHBOARD.
                 </p>
               </div>
             )}
+          </div>
+
+          {/* Pin to dashboard */}
+          <div className="border border-[#E4E4E7] p-4 flex items-center justify-between gap-3" data-testid="form-pin-section">
+            <div className="flex items-center gap-2">
+              <Sparkles className={`h-4 w-4 ${pinned ? "text-[#F59E0B]" : "text-[#71717A]"}`} fill={pinned ? "currentColor" : "none"} />
+              <div>
+                <Label className="eyebrow">PIN TO DASHBOARD</Label>
+                <p className="text-[10px] text-[#A1A1AA] font-mono-label mt-1">
+                  UP TO 8 PINNED COSTUMES APPEAR ON THE HOMEPAGE.
+                </p>
+              </div>
+            </div>
+            <Switch
+              data-testid="form-pin-switch"
+              checked={pinned}
+              onCheckedChange={setPinned}
+            />
           </div>
 
           <DialogFooter className="gap-2">

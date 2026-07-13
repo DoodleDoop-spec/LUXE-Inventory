@@ -58,6 +58,14 @@ export default function Shows() {
     return m;
   }, [costumes]);
 
+  const liveShowIds = useMemo(() => {
+    const s = new Set();
+    for (const c of costumes) {
+      if (c.in_use && c.current_show_id) s.add(c.current_show_id);
+    }
+    return s;
+  }, [costumes]);
+
   const openNew = () => {
     setForm({ name: "", year: "", notes: "", show_link: "", image_id: null });
     setDialogOpen(true);
@@ -171,6 +179,11 @@ export default function Shows() {
                           {s.show_link && (
                             <div className="absolute top-2 right-2 bg-white/95 border border-[#E4E4E7] p-1" title="Has watch link">
                               <LinkIcon className="h-3 w-3 text-[#09090B]" />
+                            </div>
+                          )}
+                          {liveShowIds.has(s.id) && (
+                            <div className="absolute top-2 left-2 bg-[#10B981] text-white px-2 py-0.5 text-[10px] font-mono-label tracking-widest flex items-center gap-1" data-testid={`show-live-${s.id}`}>
+                              <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" /> LIVE
                             </div>
                           )}
                         </div>

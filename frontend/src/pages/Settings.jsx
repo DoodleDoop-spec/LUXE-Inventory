@@ -1,6 +1,8 @@
 import { useEffect, useState, useMemo, useRef } from "react";
 import { api } from "@/lib/api";
-import { Plus, Trash2, Tag, Save, Ruler, ChevronDown, ChevronRight, X, Film, Upload, Image as ImageIcon, LinkIcon } from "lucide-react";
+import { useSettings } from "@/context/SettingsContext";
+import { useConfirm } from "@/components/ConfirmDialog";
+import { Plus, Trash2, Tag, Save, Ruler, ChevronDown, ChevronRight, X, Film, Upload, Image as ImageIcon, LinkIcon, Settings as SettingsIcon, MapPin, Boxes, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,10 +10,13 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import LocationTree from "@/components/LocationTree";
 
 export default function Settings() {
+  const { settings: globalSettings, updateSettings: pushSettings, refreshSettings } = useSettings();
+  const confirm = useConfirm();
   const [categories, setCategories] = useState([]);
   const [newCat, setNewCat] = useState("");
   const [expandedCat, setExpandedCat] = useState({});
@@ -31,7 +36,7 @@ export default function Settings() {
   const [expandedYear, setExpandedYear] = useState({});
   const [locations, setLocations] = useState([]);
   const [newLocRoot, setNewLocRoot] = useState("");
-  const [settings, setSettings] = useState({ org_name: "", logo_image_id: null, default_view: "grid", show_flag_banner: true });
+  const [settings, setSettings] = useState({ org_name: "", logo_image_id: null, default_view: "grid", show_flag_banner: true, hide_in_use_mode: "full" });
   const [savingSettings, setSavingSettings] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const logoInputRef = useRef(null);
@@ -64,7 +69,8 @@ export default function Settings() {
     catch (err) { toast.error(err.response?.data?.detail || "Failed to add"); }
   };
   const removeCategory = async (id, name) => {
-    if (!window.confirm(`Delete category "${name}"?`)) return;
+    const ok = await confirm({ title: `Delete category "${name}"?`, description: "You can only delete categories that no costume uses.", confirmLabel: "Delete", danger: true });
+    if (!ok) return;
     try { await api.delete(`/categories/${id}`); toast.success("Category removed"); fetchAll(); }
     catch (err) { toast.error(err.response?.data?.detail || "Cannot delete"); }
   };
@@ -86,7 +92,7 @@ export default function Settings() {
   };
   const removeSubcat = async (catId, subId, name, kidCount) => {
     if (kidCount > 0) { toast.error("Delete nested subcategories first"); return; }
-    if (!window.confirm(`Remove subcategory "${name}"?`)) return;
+    if (!(await confirm({ title: `Remove subcategory "${name}"?`, confirmLabel: "Remove", danger: true }))) return;
     try {
       await api.delete(`/categories/${catId}/subcategories/${subId}`);
       toast.success("Subcategory removed");
@@ -120,7 +126,7 @@ export default function Settings() {
     } catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
   };
   const removeSizingSystem = async (id, name) => {
-    if (!window.confirm(`Delete sizing system "${name}"?`)) return;
+    if (!(await confirm({ title: `Delete sorting system "${name}"?`, description: "You can only delete systems that no costume uses.", confirmLabel: "Delete", danger: true }))) return;
     try { await api.delete(`/sizing-systems/${id}`); toast.success("Removed"); fetchAll(); }
     catch (err) { toast.error(err.response?.data?.detail || "Cannot delete"); }
   };
@@ -164,7 +170,7 @@ export default function Settings() {
     } catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
   };
   const removeShow = async (id, name) => {
-    if (!window.confirm(`Delete show "${name}"?`)) return;
+    if (!(await confirm({ title: `Delete show "${name}"?`, description: "This is only allowed if no costume references this show.", confirmLabel: "Delete", danger: true }))) return;
     try { await api.delete(`/shows/${id}`); toast.success("Removed"); fetchAll(); }
     catch (err) { toast.error(err.response?.data?.detail || "Cannot delete"); }
   };
@@ -215,14 +221,14 @@ export default function Settings() {
   };
   const removeLocation = async (id, name, kidCount) => {
     if (kidCount > 0) { toast.error("Delete nested locations first"); return; }
-    if (!window.confirm(`Delete "${name}"?`)) return;
+    if (!(await confirm({ title: `Delete "${name}"?`, confirmLabel: "Delete", danger: true }))) return;
     try { await api.delete(`/locations/${id}`); toast.success("Removed"); fetchAll(); }
     catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
   };
 
   const saveSettings = async () => {
     setSavingSettings(true);
-    try { await api.put("/settings", settings); toast.success("Settings saved"); }
+    try { await pushSettings(settings); toast.success("Settings saved"); }
     catch (err) { toast.error(err.response?.data?.detail || "Failed to save"); }
     setSavingSettings(false);
   };
@@ -238,7 +244,7 @@ export default function Settings() {
       const r = await api.post("/upload", fd, { headers: { "Content-Type": "multipart/form-data" } });
       const next = { ...settings, logo_image_id: r.data.image_id };
       setSettings(next);
-      await api.put("/settings", next);
+      await pushSettings({ logo_image_id: r.data.image_id });
       toast.success("Logo uploaded");
     } catch (err) {
       toast.error(err.response?.data?.detail || "Upload failed");
@@ -248,10 +254,9 @@ export default function Settings() {
   };
 
   const removeLogo = async () => {
-    const next = { ...settings, logo_image_id: "" };
     setSettings({ ...settings, logo_image_id: null });
     try {
-      await api.put("/settings", next);
+      await pushSettings({ logo_image_id: "" });
       toast.success("Logo removed");
     } catch (err) {
       toast.error("Failed to remove logo");
@@ -278,6 +283,29 @@ export default function Settings() {
         </p>
       </div>
 
+      <Tabs defaultValue="general" className="w-full" data-testid="settings-tabs">
+        <TabsList className="rounded-none border border-[#E4E4E7] p-0 h-auto bg-white flex flex-wrap justify-start w-full">
+          <TabsTrigger value="general" data-testid="settings-tab-general" className="rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-11 px-5 gap-1.5">
+            <SettingsIcon className="h-3.5 w-3.5" /> General
+          </TabsTrigger>
+          <TabsTrigger value="storage" data-testid="settings-tab-storage" className="rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-11 px-5 gap-1.5">
+            <MapPin className="h-3.5 w-3.5" /> Storage
+          </TabsTrigger>
+          <TabsTrigger value="taxonomy" data-testid="settings-tab-taxonomy" className="rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-11 px-5 gap-1.5">
+            <Tag className="h-3.5 w-3.5" /> Categories
+          </TabsTrigger>
+          <TabsTrigger value="sorting" data-testid="settings-tab-sorting" className="rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-11 px-5 gap-1.5">
+            <Ruler className="h-3.5 w-3.5" /> Sorting Systems
+          </TabsTrigger>
+          <TabsTrigger value="shows" data-testid="settings-tab-shows" className="rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-11 px-5 gap-1.5">
+            <Film className="h-3.5 w-3.5" /> Shows
+          </TabsTrigger>
+          <TabsTrigger value="maintenance" data-testid="settings-tab-maintenance" className="rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-11 px-5 gap-1.5">
+            <Wrench className="h-3.5 w-3.5" /> Maintenance
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="general" className="mt-6" data-testid="settings-content-general">
       {/* General */}
       <section className="grid md:grid-cols-12 gap-8">
         <div className="md:col-span-4">
@@ -356,6 +384,34 @@ export default function Settings() {
             </div>
             <Switch data-testid="settings-flag-banner" checked={!!settings.show_flag_banner} onCheckedChange={(v) => setSettings({ ...settings, show_flag_banner: v })} />
           </div>
+          <div className="p-5 space-y-2">
+            <div>
+              <Label className="eyebrow">CURRENTLY IN-USE VISIBILITY</Label>
+              <p className="text-xs text-[#71717A] mt-1">Control how &quot;in use&quot; costumes appear on the dashboard.</p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2">
+              {[
+                { v: "full", label: "Show everything", desc: "Section + IN USE badges" },
+                { v: "hide_marker", label: "Hide markers only", desc: "Keep section, drop the green tags" },
+                { v: "hide_all", label: "Don't spoil the surprise!", desc: "Hide the whole section 🤫" },
+              ].map((opt) => (
+                <button
+                  key={opt.v}
+                  type="button"
+                  data-testid={`settings-in-use-mode-${opt.v}`}
+                  onClick={() => setSettings({ ...settings, hide_in_use_mode: opt.v })}
+                  className={`text-left p-3 border transition-colors ${
+                    settings.hide_in_use_mode === opt.v
+                      ? "border-[#09090B] bg-[#09090B] text-white"
+                      : "border-[#E4E4E7] bg-white text-[#09090B] hover:border-[#09090B]"
+                  }`}
+                >
+                  <div className="text-sm font-medium">{opt.label}</div>
+                  <div className={`text-[10px] font-mono-label mt-1 ${settings.hide_in_use_mode === opt.v ? "text-white/70" : "text-[#71717A]"}`}>{opt.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="p-5 flex justify-end">
             <Button data-testid="settings-save-btn" onClick={saveSettings} disabled={savingSettings} className="bg-[#09090B] hover:bg-[#27272A] text-white rounded-none h-10">
               <Save className="h-4 w-4 mr-1" />{savingSettings ? "Saving…" : "Save changes"}
@@ -363,7 +419,9 @@ export default function Settings() {
           </div>
         </div>
       </section>
+        </TabsContent>
 
+        <TabsContent value="storage" className="mt-6" data-testid="settings-content-storage">
       {/* Locations (nested tree) */}
       <section className="grid md:grid-cols-12 gap-8">
         <div className="md:col-span-4">
@@ -383,7 +441,9 @@ export default function Settings() {
           <LocationTree locations={locations} onAdd={addChildLocation} onRename={renameLocation} onDelete={removeLocation} />
         </div>
       </section>
+        </TabsContent>
 
+        <TabsContent value="taxonomy" className="mt-6" data-testid="settings-content-taxonomy">
       {/* Categories with nested subcategories */}
       <section className="grid md:grid-cols-12 gap-8">
         <div className="md:col-span-4">
@@ -474,7 +534,9 @@ export default function Settings() {
           <CategoryMergeCard categories={categories} onMerged={fetchAll} />
         </div>
       </section>
+        </TabsContent>
 
+        <TabsContent value="maintenance" className="mt-6" data-testid="settings-content-maintenance">
       {/* Data maintenance */}
       <section className="grid md:grid-cols-12 gap-8" data-testid="settings-maintenance">
         <div className="md:col-span-4">
@@ -495,7 +557,9 @@ export default function Settings() {
           <MigrateLegacyButton />
         </div>
       </section>
+        </TabsContent>
 
+        <TabsContent value="shows" className="mt-6" data-testid="settings-content-shows">
       {/* Shows grouped by year */}
       <section className="grid md:grid-cols-12 gap-8">
         <div className="md:col-span-4">
@@ -617,26 +681,31 @@ export default function Settings() {
           })}
         </div>
       </section>
+        </TabsContent>
 
-      {/* Sizing Systems */}
+        <TabsContent value="sorting" className="mt-6" data-testid="settings-content-sorting">
+      {/* Sorting Systems */}
       <section className="grid md:grid-cols-12 gap-8">
         <div className="md:col-span-4">
-          <div className="eyebrow">SIZING</div>
-          <h2 className="font-display text-xl font-semibold text-[#09090B] mt-2">Sizing systems</h2>
+          <div className="eyebrow">SORTING</div>
+          <h2 className="font-display text-xl font-semibold text-[#09090B] mt-2">Sorting systems</h2>
+          <p className="text-sm text-[#71717A] mt-2">
+            Any set of values you use to break costumes down — sizes (XS/S/M), colors, positions, whatever.
+          </p>
         </div>
         <div className="md:col-span-8 space-y-4">
           <form onSubmit={addSizingSystem} className="border border-[#E4E4E7] p-4 grid md:grid-cols-2 gap-3">
             <Input data-testid="settings-new-sys-name" placeholder="System name" value={newSysName} onChange={(e) => setNewSysName(e.target.value)} className="h-11 rounded-none border-[#E4E4E7]" />
-            <Input data-testid="settings-new-sys-sizes" placeholder="Sizes, comma-separated" value={newSysSizes} onChange={(e) => setNewSysSizes(e.target.value)} className="h-11 rounded-none border-[#E4E4E7]" />
+            <Input data-testid="settings-new-sys-sizes" placeholder="Values, comma-separated" value={newSysSizes} onChange={(e) => setNewSysSizes(e.target.value)} className="h-11 rounded-none border-[#E4E4E7]" />
             <div className="md:col-span-2 flex justify-end">
               <Button data-testid="settings-add-sys-btn" type="submit" className="bg-[#09090B] text-white hover:bg-[#27272A] rounded-none h-10 px-4">
-                <Plus className="h-4 w-4 mr-1" /> Add sizing system
+                <Plus className="h-4 w-4 mr-1" /> Add sorting system
               </Button>
             </div>
           </form>
           <div className="border border-[#E4E4E7]">
             {sizingSystems.length === 0 ? (
-              <div className="p-8 text-center text-[#71717A]">No sizing systems yet.</div>
+              <div className="p-8 text-center text-[#71717A]">No sorting systems yet.</div>
             ) : sizingSystems.map((s, idx) => (
               <div key={s.id} data-testid={`sys-row-${s.id}`} className={`${idx !== sizingSystems.length - 1 ? "border-b border-[#E4E4E7]" : ""}`}>
                 {editingSys === s.id ? (
@@ -659,7 +728,7 @@ export default function Settings() {
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <button data-testid={`edit-sys-${s.id}`} onClick={() => startEditSys(s)} className="text-xs font-medium text-[#09090B] hover:underline px-2 py-1">Edit</button>
-                      <button data-testid={`delete-sys-${s.id}`} onClick={() => removeSizingSystem(s.id, s.name)} className="text-[#EF4444] hover:bg-[#FEF2F2] p-2" aria-label="Delete sizing system">
+                      <button data-testid={`delete-sys-${s.id}`} onClick={() => removeSizingSystem(s.id, s.name)} className="text-[#EF4444] hover:bg-[#FEF2F2] p-2" aria-label="Delete sorting system">
                         <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
@@ -670,6 +739,8 @@ export default function Settings() {
           </div>
         </div>
       </section>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
@@ -710,6 +781,7 @@ function SubcategoryTree({ catId, nodes, onAdd, onRename, onDelete }) {
 
 
 function CategoryMergeCard({ categories, onMerged }) {
+  const confirm = useConfirm();
   const [keeperId, setKeeperId] = useState("");
   const [discardId, setDiscardId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -718,9 +790,13 @@ function CategoryMergeCard({ categories, onMerged }) {
   const disabled = !keeper || !discard || keeper.id === discard.id;
   const submit = async () => {
     if (disabled) return;
-    if (!window.confirm(
-      `Merge "${discard.name}" INTO "${keeper.name}"?\n\nAll costumes currently under "${discard.name}" will be reassigned to "${keeper.name}" (subcategories will be cleared for those items).\nThe "${discard.name}" category will be deleted.`
-    )) return;
+    const ok = await confirm({
+      title: `Merge "${discard.name}" into "${keeper.name}"?`,
+      description: `All costumes currently under "${discard.name}" will be reassigned to "${keeper.name}" (their subcategories will be cleared). The "${discard.name}" category will be deleted.`,
+      confirmLabel: "Merge",
+      danger: true,
+    });
+    if (!ok) return;
     setBusy(true);
     try {
       const r = await api.post("/categories/merge", { keeper_id: keeper.id, discard_id: discard.id });
