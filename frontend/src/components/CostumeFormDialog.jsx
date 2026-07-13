@@ -1063,32 +1063,7 @@ export default function CostumeFormDialog({
             <p className="text-xs text-[#A1A1AA]">Press Enter or comma to add. Backspace removes last.</p>
           </div>
 
-          {/* Group assignment */}
-          <div className="border border-[#E4E4E7] p-4 space-y-2">
-            <Label className="eyebrow">INVENTORY GROUP</Label>
-            <div className="grid md:grid-cols-2 gap-2">
-              <Select value={groupId || "__none__"} onValueChange={(v) => setGroupId(v === "__none__" ? "" : v)}>
-                <SelectTrigger data-testid="form-group" className="rounded-none border-[#E4E4E7] h-11">
-                  <SelectValue placeholder="No group" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">— No group —</SelectItem>
-                  {(groups || []).map((g) => (
-                    <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Input
-                data-testid="form-variant-label"
-                value={variantLabel}
-                onChange={(e) => setVariantLabel(e.target.value)}
-                placeholder="Variant label (e.g. Red, Blue)"
-                disabled={!groupId}
-                className="rounded-none border-[#E4E4E7] h-11"
-              />
-            </div>
-            <p className="text-xs text-[#A1A1AA]">Assign this piece to a group of variants (same item, different colors, etc.).</p>
-          </div>
+          {/* Inventory group section removed — groups are being merged into categories/subcategories */}
 
           {/* Flags (multi) */}
           <div className="border border-[#E4E4E7] p-4 space-y-3" data-testid="form-flags-section">

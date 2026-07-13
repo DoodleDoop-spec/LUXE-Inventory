@@ -30,6 +30,16 @@ A proprietary internal tracking system for costumes/accessories with location tr
 - Wording sweep to "costumes / accessories".
 - Drag & drop on Inventory.
 
+### Iteration 10 — Jul 2026 (this session)
+- **Category ↔ Group merge (backend layer)**: Categories and Subcategories now carry `image_id`, `location`, `sub_location`, `notes`, `keywords`, `creator`. API endpoints (`PUT /categories/{id}`, `POST/PUT /categories/{id}/subcategories`) accept and persist these. Subcategories can be nested and each can act like a "group" (image + location + notes) — Q1c.
+- **Costume shows revamp**: Removed `original_show_id`; costumes now carry `shows: [{show_id, timestamp}]` with per-costume timestamps. Origin year is derived as MIN(show.year) across attached shows. Legacy fields are read but no longer written; a startup migration back-fills the new field from legacy data.
+- **Show model**: `link_timestamp` was removed from Show. Video timestamp is now purely per-costume. Show still has `show_link`; the costume form lets each costume edit that link inline if it's missing.
+- **Sizing → Sorting system**: renamed the concept everywhere in the API (`sorting_system` field on Costume) and UI (labels, testids). Both legacy `sizing_system` and new `sorting_system` are accepted in payloads. `/api/sorting-systems` endpoints alias `/api/sizing-systems`. Users can create a new sorting system inline from the costume form ("Colors", "Rings", etc.).
+- **Dashboard**: 8 clickable tiles — Total Pieces (→ /inventory), Total Quantity (→ /inventory), Equipment (→ /equipment), In Use (→ /inventory), Categories (→ /settings), Storage Locations (→ /locations), Shows (→ /shows), Flagged (→ /flags). Hover reveals a "VIEW →" hint.
+- **Equipment tab**: New nav item next to Inventory with a `/equipment` stub page ("Coming soon"). Backing `equipment_count` stat is 0 for now.
+- **Startup migrations**: rename `sizing_system` → `sorting_system` on costumes, build `shows` list from legacy fields, unset `link_timestamp` from all shows.
+- Removed "New Group" button and Groups strip from Inventory (superseded by category grouping).
+
 ### Iteration 9 — Feb 2026 (this session)
 - **Inline entity creation from Costume form** — create new subcategory, storage location, or show without leaving the modal. Similar-category detector shows one-click "Use existing X" chips when a fuzzy match is found.
 - **Collapsible global search** — magnifying-glass icon expands into a search input; auto-collapses when empty.
