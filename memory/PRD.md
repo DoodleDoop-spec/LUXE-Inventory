@@ -30,6 +30,13 @@ A proprietary internal tracking system for costumes/accessories with location tr
 - Wording sweep to "costumes / accessories".
 - Drag & drop on Inventory.
 
+### Iteration 13 — Jul 2026 (this session, bug fixes)
+- **Line rotation full 360°**: The floorplan line shape can now be freely rotated in any direction. Fixes: (a) lines now render two draggable endpoint circles (small black dots at both ends) when selected — drag either end anywhere on the canvas; (b) the resize deltas no longer clamp negative values for lines (they do still clamp for rects/circles which need positive dimensions).
+- **Sublocation linking on maps**: Both photo pins and floorplan shapes gained a `location_id` field. The property panel now shows a "LINK TO SUBLOCATION" dropdown listing this location's direct children. Once linked, the shape/pin gets a small 🔗 marker and can be opened by (a) double-clicking the shape/pin on the canvas or (b) clicking "→ Open this sublocation's map" in the property panel. Backend `MapPin` and `MapShape` models updated accordingly.
+- **Default collapse fixes**: (a) Flags list default state flipped to collapsed. (b) Inventory + Equipment categories now default to collapsed — expand-on-click. (c) Shows-by-year sections in Settings default to collapsed.
+- **hide_in_use_mode extended to Inventory**: The setting now also controls the "IN USE" badge on Inventory cards. `hide_marker` mode drops the badge; `hide_all` mode hides the card entirely.
+- **Dialog X always reachable**: `CostumeFormDialog` and `EquipmentFormDialog` restructured to `flex flex-col max-h-[90vh] overflow-hidden` with a non-scrolling sticky header + scrolling body. The X button now stays fixed at the top-right regardless of scroll position.
+
 ### Iteration 12 — Jul 2026 (this session)
 - **Equipment inventory**: Full CRUD sibling to costumes with its own categories & sorting systems. Backend: `equipment`, `equipment_categories`, `equipment_sorting_systems` collections. New endpoints under `/api/equipment`, `/api/equipment-categories`, `/api/equipment-sorting-systems`, plus `/api/equipment-stats` and `/api/equipment/pinned`. Frontend: new `Equipment.jsx` page with category accordion, `EquipmentFormDialog.jsx` with all the polish (image upload, sorting-system-none flow, keywords, in-use/pin toggles, inline category creation).
 - **Sorting-system display fix**: When a costume/equipment has no sorting system, the size grid + "SYSTEM · Letter" label are hidden. Instead the card shows a big "QUANTITY: N" number.
