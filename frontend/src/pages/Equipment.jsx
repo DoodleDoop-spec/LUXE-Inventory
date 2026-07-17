@@ -21,7 +21,7 @@ export default function Equipment() {
   const [q, setQ] = useState("");
   const [editingItem, setEditingItem] = useState(null);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [collapsedCategories, setCollapsedCategories] = useState({});
+  const [expandedCategories, setExpandedCategories] = useState({});
 
   const fetchAll = async () => {
     setLoading(true);
@@ -147,13 +147,13 @@ export default function Equipment() {
           {grouped.map(([catName, list]) => {
             const catMeta = categories.find((c) => c.name === catName);
             const color = catMeta?.color || "#71717A";
-            const collapsed = !!collapsedCategories[catName];
+            const collapsed = !expandedCategories[catName];
             return (
               <section key={catName} data-testid={`equip-cat-${catName}`} className="border border-[#E4E4E7]">
                 <button
                   type="button"
                   data-testid={`equip-cat-toggle-${catName}`}
-                  onClick={() => setCollapsedCategories((p) => ({ ...p, [catName]: !p[catName] }))}
+                  onClick={() => setExpandedCategories((p) => ({ ...p, [catName]: !p[catName] }))}
                   className="w-full flex items-center gap-3 p-4 md:p-5 hover:bg-[#FAFAFA]"
                 >
                   {collapsed ? <ChevronRight className="h-5 w-5 text-[#09090B]" /> : <ChevronDown className="h-5 w-5 text-[#09090B]" />}

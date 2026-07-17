@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from "react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useConfirm } from "@/components/ConfirmDialog";
+import { useSettings } from "@/context/SettingsContext";
 import { Plus, Search, LayoutGrid, List, X, MapPin, ChevronRight, ChevronDown, Flag, StickyNote, SlidersHorizontal, ArrowUpDown, Calendar, Image as ImageIcon, Package, Tag as TagIcon, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,6 +40,9 @@ export default function Inventory() {
   const location = useLocation();
   const navigate = useNavigate();
   const confirm = useConfirm();
+  const { settings } = useSettings();
+  const showInUseMarker = (settings.hide_in_use_mode || "full") === "full";
+  const hideInUseAll = (settings.hide_in_use_mode || "full") === "hide_all";
   const [costumes, setCostumes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState([]);
@@ -46,7 +50,7 @@ export default function Inventory() {
   const [sizingSystems, setSizingSystems] = useState([]);
   const [shows, setShows] = useState([]);
   const [groups, setGroups] = useState([]);
-  const [collapsedCategories, setCollapsedCategories] = useState({});
+  const [expandedCategories, setExpandedCategories] = useState({});
   const [q, setQ] = useState("");
   const [category, setCategory] = useState(ALL);
   const [subcategory, setSubcategory] = useState(ALL);
@@ -458,13 +462,13 @@ export default function Inventory() {
               {entries.map(([catName, items]) => {
                 const catMeta = (categories || []).find((c) => c.name === catName);
                 const color = catMeta?.color || "#71717A";
-                const isCollapsed = !!collapsedCategories[catName];
+                const isCollapsed = !expandedCategories[catName];
                 return (
                   <section key={catName} data-testid={`inv-cat-${catName}`} className="border border-[#E4E4E7]">
                     <button
                       type="button"
                       data-testid={`inv-cat-toggle-${catName}`}
-                      onClick={() => setCollapsedCategories((prev) => ({ ...prev, [catName]: !prev[catName] }))}
+                      onClick={() => setExpandedCategories((prev) => ({ ...prev, [catName]: !prev[catName] }))}
                       onDragOver={(e) => { e.preventDefault(); setDragOverTarget(`cat:${catName}`); }}
                       onDragLeave={() => setDragOverTarget(null)}
                       onDrop={(e) => { e.preventDefault(); handleDropOnCategory(catName); setDragOverTarget(null); }}
@@ -479,7 +483,7 @@ export default function Inventory() {
                     </button>
                     {!isCollapsed && (
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-px bg-[#E4E4E7] border-t border-[#E4E4E7]">
-                        {items.map((c) => (
+                        {items.filter((c) => !(hideInUseAll && c.in_use)).map((c) => (
                           <CostumeCard
                             key={c.id}
                             costume={c}
@@ -488,6 +492,7 @@ export default function Inventory() {
                             sizingSystems={sizingSystems}
                             showsById={showsById}
                             categories={categories}
+                            showInUseMarker={showInUseMarker}
                             onDragStart={() => setDragging(c)}
                             onDragEnd={() => { setDragging(null); setDragOverTarget(null); }}
                             isDragging={dragging?.id === c.id}
@@ -598,7 +603,7 @@ export default function Inventory() {
   );
 }
 
-function CostumeCard({ costume, onEdit, onDelete, sizingSystems, showsById, categories, onDragStart, onDragEnd, isDragging }) {
+function CostumeCard({ costume, onEdit, onDelete, sizingSystems, showsById, categories, showInUseMarker = true, onDragStart, onDragEnd, isDragging }) {
   const effectiveSys = costume.sorting_system || costume.sizing_system || "";
   const sys = effectiveSys ? sizingSystems.find((s) => s.name === effectiveSys) : null;
   const sizeKeys = sys?.sizes || Object.keys(costume.sizes || {});
@@ -629,7 +634,7 @@ function CostumeCard({ costume, onEdit, onDelete, sizingSystems, showsById, cate
               <span className="text-[10px] font-mono-label">FLAGGED</span>
             </div>
           )}
-          {costume.in_use && (
+          {showInUseMarker && costume.in_use && (
             <div className="absolute top-2 left-2 bg-[#10B981] text-white px-2 py-1 flex items-center gap-1" data-testid={`in-use-badge-${costume.id}`}>
               <Sparkles className="h-3 w-3" />
               <span className="text-[10px] font-mono-label">IN USE</span>

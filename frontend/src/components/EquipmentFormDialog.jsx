@@ -175,15 +175,15 @@ export default function EquipmentFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto rounded-none border-[#09090B]" data-testid="equipment-form-dialog">
-        <DialogHeader>
+      <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col overflow-hidden p-0 rounded-none border-[#09090B]" data-testid="equipment-form-dialog">
+        <DialogHeader className="p-6 pb-3 shrink-0 border-b border-[#E4E4E7] bg-white">
           <div className="eyebrow">{editing ? "EDIT / EQUIPMENT" : "NEW / EQUIPMENT"}</div>
           <DialogTitle className="font-display text-2xl tracking-tight">{editing ? "Edit Equipment" : "Add Equipment"}</DialogTitle>
           <DialogDescription className="text-[#71717A]">
             Track a piece of equipment — lights, cables, tools, props, mics, backstage gear.
           </DialogDescription>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-5 mt-2">
+        <form onSubmit={handleSubmit} className="space-y-5 p-6 flex-1 overflow-y-auto">
           {/* Photo */}
           <div className="flex items-start gap-4">
             <div className="w-28 h-28 image-empty border border-[#E4E4E7] overflow-hidden flex items-center justify-center shrink-0">

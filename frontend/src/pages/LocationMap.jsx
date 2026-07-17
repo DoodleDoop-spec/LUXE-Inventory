@@ -14,6 +14,7 @@ export default function LocationMap() {
   const navigate = useNavigate();
   const confirm = useConfirm();
   const [loc, setLoc] = useState(null);
+  const [allLocations, setAllLocations] = useState([]);
   const [mode, setMode] = useState("none");
   const [imageId, setImageId] = useState(null);
   const [pins, setPins] = useState([]);
@@ -25,8 +26,12 @@ export default function LocationMap() {
 
   const load = async () => {
     try {
-      const r = await api.get(`/locations/${id}`);
+      const [r, la] = await Promise.all([
+        api.get(`/locations/${id}`),
+        api.get("/locations"),
+      ]);
       setLoc(r.data);
+      setAllLocations(la.data);
       setMode(r.data.map_mode || "none");
       setImageId(r.data.map_image_id || null);
       setPins(r.data.map_pins || []);
@@ -126,6 +131,8 @@ export default function LocationMap() {
           setPins={(v) => { setPins(v); markDirty(); }}
           onUpload={uploadPhoto}
           uploading={uploading}
+          childLocations={allLocations.filter((l) => l.parent_id === id)}
+          navigate={navigate}
         />
       )}
 
@@ -135,6 +142,8 @@ export default function LocationMap() {
           setShapes={(v) => { setShapes(v); markDirty(); }}
           tool={tool}
           setTool={setTool}
+          childLocations={allLocations.filter((l) => l.parent_id === id)}
+          navigate={navigate}
         />
       )}
     </div>
@@ -142,7 +151,7 @@ export default function LocationMap() {
 }
 
 /* ============= PHOTO + PINS EDITOR ============= */
-function PhotoPinEditor({ imageId, setImageId, pins, setPins, onUpload, uploading }) {
+function PhotoPinEditor({ imageId, setImageId, pins, setPins, onUpload, uploading, childLocations = [], navigate }) {
   const imgRef = useRef(null);
   const [selectedPin, setSelectedPin] = useState(null);
   const [dragging, setDragging] = useState(null);
@@ -284,11 +293,39 @@ function PhotoPinEditor({ imageId, setImageId, pins, setPins, onUpload, uploadin
                 className="rounded-none border-[#E4E4E7] h-8 text-xs"
               />
               {selectedPin === p.id && (
-                <div className="flex gap-1 mt-1">
-                  {["#EF4444", "#F59E0B", "#10B981", "#3B82F6", "#8B5CF6", "#71717A"].map((c) => (
-                    <button key={c} type="button" onClick={() => updatePin(p.id, { color: c })} className={`w-5 h-5 rounded-full border ${p.color === c ? "border-[#09090B] scale-110" : "border-transparent"}`} style={{ backgroundColor: c }} />
-                  ))}
-                </div>
+                <>
+                  <div className="flex gap-1 mt-1">
+                    {["#EF4444", "#F59E0B", "#10B981", "#3B82F6", "#8B5CF6", "#71717A"].map((c) => (
+                      <button key={c} type="button" onClick={() => updatePin(p.id, { color: c })} className={`w-5 h-5 rounded-full border ${p.color === c ? "border-[#09090B] scale-110" : "border-transparent"}`} style={{ backgroundColor: c }} />
+                    ))}
+                  </div>
+                  {childLocations.length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      <div className="text-[10px] font-mono-label text-[#71717A]">LINK TO SUBLOCATION</div>
+                      <select
+                        data-testid={`pin-location-${p.id}`}
+                        value={p.location_id || ""}
+                        onChange={(e) => updatePin(p.id, { location_id: e.target.value || null })}
+                        className="w-full border border-[#E4E4E7] h-7 text-xs px-1 rounded-none bg-white"
+                      >
+                        <option value="">— none —</option>
+                        {childLocations.map((cl) => (
+                          <option key={cl.id} value={cl.id}>{cl.name}</option>
+                        ))}
+                      </select>
+                      {p.location_id && (
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/locations/${p.location_id}/map`)}
+                          className="text-[11px] text-[#09090B] underline hover:text-[#3B82F6]"
+                          data-testid={`pin-open-${p.id}`}
+                        >
+                          → Open this sublocation&apos;s map
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           ))}
@@ -299,7 +336,7 @@ function PhotoPinEditor({ imageId, setImageId, pins, setPins, onUpload, uploadin
 }
 
 /* ============= FLOORPLAN EDITOR ============= */
-function FloorplanEditor({ shapes, setShapes, tool, setTool }) {
+function FloorplanEditor({ shapes, setShapes, tool, setTool, childLocations = [], navigate }) {
   const svgRef = useRef(null);
   const [selectedId, setSelectedId] = useState(null);
   const [drag, setDrag] = useState(null); // { id, kind: "move"|"resize", startX, startY, ox, oy, ow, oh }
@@ -349,7 +386,20 @@ function FloorplanEditor({ shapes, setShapes, tool, setTool }) {
     setShapes(shapes.map((s) => {
       if (s.id !== drag.id) return s;
       if (drag.kind === "move") return { ...s, x: drag.ox + dx, y: drag.oy + dy };
-      if (drag.kind === "resize") return { ...s, width: Math.max(10, drag.ow + dx), height: Math.max(10, drag.oh + dy) };
+      if (drag.kind === "resize") {
+        // For lines, allow full 360° (no min-size clamp on abs values)
+        if (s.type === "line") return { ...s, width: drag.ow + dx, height: drag.oh + dy };
+        return { ...s, width: Math.max(10, drag.ow + dx), height: Math.max(10, drag.oh + dy) };
+      }
+      if (drag.kind === "endpoint1") {
+        // Move start point; keep end point fixed by adjusting x/y and width/height
+        const newX = drag.ox + dx;
+        const newY = drag.oy + dy;
+        return { ...s, x: newX, y: newY, width: (drag.ox + drag.ow) - newX, height: (drag.oy + drag.oh) - newY };
+      }
+      if (drag.kind === "endpoint2") {
+        return { ...s, width: drag.ow + dx, height: drag.oh + dy };
+      }
       return s;
     }));
   };
@@ -417,10 +467,14 @@ function FloorplanEditor({ shapes, setShapes, tool, setTool }) {
               const strokeCol = isSel ? "#09090B" : (s.stroke_color || "#09090B");
               if (s.type === "rect") {
                 return (
-                  <g key={s.id} onMouseDown={(e) => startShapeDrag(s, "move", e)} data-testid={`shape-${s.id}`}>
+                  <g key={s.id} onMouseDown={(e) => startShapeDrag(s, "move", e)} data-testid={`shape-${s.id}`}
+                     onDoubleClick={() => { if (s.location_id) navigate(`/locations/${s.location_id}/map`); }}>
                     <rect x={s.x} y={s.y} width={s.width} height={s.height} fill={s.fill_color || "#DBEAFE"} stroke={strokeCol} strokeWidth={strokeW} />
                     {s.label && (
                       <text x={s.x + s.width / 2} y={s.y + s.height / 2 + 5} textAnchor="middle" fill="#09090B" fontSize="14" fontWeight="500">{s.label}</text>
+                    )}
+                    {s.location_id && (
+                      <text x={s.x + s.width - 8} y={s.y + 14} textAnchor="end" fill="#3B82F6" fontSize="10" fontWeight="700">🔗</text>
                     )}
                     {isSel && (
                       <rect x={s.x + s.width - 8} y={s.y + s.height - 8} width={16} height={16} fill="#09090B" style={{ cursor: "nwse-resize" }} onMouseDown={(e) => startShapeDrag(s, "resize", e)} />
@@ -434,9 +488,13 @@ function FloorplanEditor({ shapes, setShapes, tool, setTool }) {
                 const rx = s.width / 2;
                 const ry = s.height / 2;
                 return (
-                  <g key={s.id} onMouseDown={(e) => startShapeDrag(s, "move", e)} data-testid={`shape-${s.id}`}>
+                  <g key={s.id} onMouseDown={(e) => startShapeDrag(s, "move", e)} data-testid={`shape-${s.id}`}
+                     onDoubleClick={() => { if (s.location_id) navigate(`/locations/${s.location_id}/map`); }}>
                     <ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill={s.fill_color || "#FEE2E2"} stroke={strokeCol} strokeWidth={strokeW} />
                     {s.label && <text x={cx} y={cy + 5} textAnchor="middle" fill="#09090B" fontSize="14">{s.label}</text>}
+                    {s.location_id && (
+                      <text x={s.x + s.width - 8} y={s.y + 14} textAnchor="end" fill="#3B82F6" fontSize="10" fontWeight="700">🔗</text>
+                    )}
                     {isSel && (
                       <rect x={s.x + s.width - 8} y={s.y + s.height - 8} width={16} height={16} fill="#09090B" style={{ cursor: "nwse-resize" }} onMouseDown={(e) => startShapeDrag(s, "resize", e)} />
                     )}
@@ -444,11 +502,22 @@ function FloorplanEditor({ shapes, setShapes, tool, setTool }) {
                 );
               }
               if (s.type === "line") {
+                const x2 = s.x + s.width;
+                const y2 = s.y + s.height;
                 return (
-                  <g key={s.id} onMouseDown={(e) => startShapeDrag(s, "move", e)} data-testid={`shape-${s.id}`}>
-                    <line x1={s.x} y1={s.y} x2={s.x + s.width} y2={s.y + s.height} stroke={strokeCol} strokeWidth={4} />
+                  <g key={s.id} data-testid={`shape-${s.id}`}
+                     onDoubleClick={() => { if (s.location_id) navigate(`/locations/${s.location_id}/map`); }}>
+                    {/* Invisible thick hitbox for easier clicking */}
+                    <line x1={s.x} y1={s.y} x2={x2} y2={y2} stroke="transparent" strokeWidth={20} onMouseDown={(e) => startShapeDrag(s, "move", e)} style={{ cursor: "move" }} />
+                    <line x1={s.x} y1={s.y} x2={x2} y2={y2} stroke={strokeCol} strokeWidth={4} pointerEvents="none" />
+                    {s.label && (
+                      <text x={(s.x + x2) / 2} y={(s.y + y2) / 2 - 8} textAnchor="middle" fill="#09090B" fontSize="12" pointerEvents="none">{s.label}</text>
+                    )}
                     {isSel && (
-                      <rect x={s.x + s.width - 8} y={s.y + s.height - 8} width={16} height={16} fill="#09090B" style={{ cursor: "nwse-resize" }} onMouseDown={(e) => startShapeDrag(s, "resize", e)} />
+                      <>
+                        <circle cx={s.x} cy={s.y} r={8} fill="#09090B" stroke="white" strokeWidth={2} style={{ cursor: "move" }} onMouseDown={(e) => startShapeDrag(s, "endpoint1", e)} data-testid={`shape-endpoint1-${s.id}`} />
+                        <circle cx={x2} cy={y2} r={8} fill="#09090B" stroke="white" strokeWidth={2} style={{ cursor: "move" }} onMouseDown={(e) => startShapeDrag(s, "endpoint2", e)} data-testid={`shape-endpoint2-${s.id}`} />
+                      </>
                     )}
                   </g>
                 );
@@ -498,6 +567,33 @@ function FloorplanEditor({ shapes, setShapes, tool, setTool }) {
                       />
                     ))}
                   </div>
+                </div>
+              )}
+              {childLocations.length > 0 && (
+                <div>
+                  <div className="text-[10px] font-mono-label text-[#71717A] mb-1">LINK TO SUBLOCATION</div>
+                  <select
+                    data-testid="floorplan-selected-location"
+                    value={selected.location_id || ""}
+                    onChange={(e) => updateSelected({ location_id: e.target.value || null })}
+                    className="w-full border border-[#E4E4E7] h-8 text-xs px-1 rounded-none bg-white"
+                  >
+                    <option value="">— none —</option>
+                    {childLocations.map((cl) => (
+                      <option key={cl.id} value={cl.id}>{cl.name}</option>
+                    ))}
+                  </select>
+                  {selected.location_id && (
+                    <button
+                      type="button"
+                      data-testid="floorplan-open-sublocation"
+                      onClick={() => navigate(`/locations/${selected.location_id}/map`)}
+                      className="text-[11px] text-[#09090B] underline hover:text-[#3B82F6] mt-1"
+                    >
+                      → Open sublocation map
+                    </button>
+                  )}
+                  <p className="text-[10px] text-[#A1A1AA] mt-1">Double-click a shape to jump.</p>
                 </div>
               )}
               <button

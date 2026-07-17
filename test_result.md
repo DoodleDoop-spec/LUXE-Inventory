@@ -609,3 +609,87 @@ agent_communication_iter12:
          - DELETE /api/locations cleans up test location
       
       All backend APIs are functioning correctly. No errors or failures detected.
+
+## Iteration 13 — Jul 2026 (bug fixes)
+
+user_problem_statement_iter13: |
+  - Line rotation in floorplan can't do a full 360 (fixed: endpoints now draggable, resize doesn't clamp for lines).
+  - Sublocation linking on maps (pin or shape can be linked to a child location; double-click / button navigates).
+  - Flag, shows, and inventory categories still not collapsed by default (fixed).
+  - hide_in_use_mode functionality — also apply to Inventory card badges (hide_marker hides badges, hide_all hides costume too).
+  - Dialog X button not reachable when content is tall — added flex-column pattern so X stays fixed.
+
+backend_tasks_iter13:
+  - task: "MapPin and MapShape support location_id (link to child storage location) + line accepts negative width/height for 360° rotation"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          Added `location_id: Optional[str]` to both MapPin and MapShape. Verified via manual curl that PUT /api/locations/{id}/map with a line shape containing negative width and a location_id persists correctly and is returned as-is by GET.
+      - working: true
+        agent: "testing"
+        comment: |
+          TESTED: All 13 test steps passed. (1) Created parent location L1 "IterTest Room 1", (2) Created child location L2 "IterTest Rack 1" with parent_id=L1.id, (3) PUT /api/locations/{L1.id}/map with floorplan mode containing: rect shape with location_id=L2.id and line shape with width=-100, height=-80 → response correctly preserved location_id on rect and negative width/height on line, (4) PUT /api/locations/{L1.id}/map with photo mode containing pin with location_id=L2.id → response correctly preserved location_id on pin, (5) GET /api/locations/{L1.id} → both floorplan_shapes and map_pins returned with location_id intact, (6) Cleanup: deleted both locations successfully. All assertions passed. MapPin and MapShape location_id linking working correctly. Negative width/height for lines preserved (not clamped to 0), enabling full 360° rotation.
+
+test_plan_iter13:
+  current_focus:
+    - "MapPin and MapShape support location_id (link to child storage location) + line accepts negative width/height for 360° rotation"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication_iter13:
+  - agent: "main"
+    message: |
+      Backend Iteration 13 test — just one change to verify:
+
+      1) Create a location L1 (POST /api/locations {"name":"Room 1"}).
+      2) Create a child location L2 (POST /api/locations {"name":"Rack 1","parent_id":"<L1.id>"}).
+      3) PUT /api/locations/L1/map with:
+         {
+           "map_mode": "floorplan",
+           "floorplan_shapes": [
+             {"id":"s1","type":"rect","x":100,"y":100,"width":200,"height":100,"label":"Rack A","location_id":"<L2.id>"},
+             {"id":"s2","type":"line","x":50,"y":50,"width":-100,"height":-80,"label":"Backward line"}
+           ]
+         }
+         → 200. Response floorplan_shapes[0].location_id == L2.id. floorplan_shapes[1].width == -100 (negative preserved).
+      4) PUT /api/locations/L1/map with:
+         {
+           "map_mode":"photo",
+           "map_pins":[
+             {"id":"p1","x_pct":30,"y_pct":40,"label":"Rack area","location_id":"<L2.id>","color":"#3B82F6"}
+           ]
+         }
+         → 200. Response map_pins[0].location_id == L2.id.
+      5) GET /api/locations/L1 → response.floorplan_shapes[0].location_id and response.map_pins[0].location_id both preserved.
+      6) Cleanup: delete L2 then L1.
+
+      That's the only backend change. Please report pass/fail.
+  - agent: "testing"
+    message: |
+      ✅ ITERATION 13 BACKEND TEST PASSED (13/13 steps)
+      
+      Completed comprehensive end-to-end testing of the single backend task:
+      
+      ✅ MapPin and MapShape location_id linking + negative width/height for lines:
+         - Step 1: Created parent location L1 "IterTest Room 1" → success
+         - Step 2: Created child location L2 "IterTest Rack 1" with parent_id=L1.id → success
+         - Step 3: PUT floorplan with rect shape (location_id=L2.id) and line shape (width=-100, height=-80) → success
+         - Step 3a: Verified floorplan_shapes[0].location_id === L2.id → ✓
+         - Step 3b: Verified floorplan_shapes[1].width === -100 (negative preserved) → ✓
+         - Step 3c: Verified floorplan_shapes[1].height === -80 (negative preserved) → ✓
+         - Step 4: PUT photo mode with pin (location_id=L2.id) → success
+         - Step 4a: Verified map_pins[0].location_id === L2.id → ✓
+         - Step 5: GET /api/locations/{L1.id} returns location data → success
+         - Step 5a: Verified floorplan_shapes with location_id intact → ✓
+         - Step 5b: Verified map_pins with location_id intact → ✓
+         - Step 6a: Deleted child location L2 → success
+         - Step 6b: Deleted parent location L1 → success
+      
+      All backend APIs are functioning correctly. MapPin and MapShape now support location_id field for linking to child storage locations. Line shapes correctly accept and preserve negative width/height values (not clamped to 0), enabling full 360° rotation. No errors or failures detected.
+

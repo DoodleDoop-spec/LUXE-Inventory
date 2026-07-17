@@ -2064,6 +2064,7 @@ class MapPin(BaseModel):
     label: str = ""
     item_id: Optional[str] = None  # link to a costume or equipment item
     item_type: Optional[str] = None  # "costume" | "equipment"
+    location_id: Optional[str] = None  # link to a child storage location
     color: Optional[str] = "#EF4444"
 
 
@@ -2080,6 +2081,7 @@ class MapShape(BaseModel):
     stroke_color: Optional[str] = "#09090B"
     item_id: Optional[str] = None
     item_type: Optional[str] = None
+    location_id: Optional[str] = None
 
 
 class LocationMapPayload(BaseModel):

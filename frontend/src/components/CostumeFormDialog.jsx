@@ -557,8 +557,8 @@ export default function CostumeFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl rounded-none border-[#09090B] max-h-[90vh] overflow-y-auto" data-testid="costume-form-dialog">
-        <DialogHeader>
+      <DialogContent className="max-w-3xl rounded-none border-[#09090B] max-h-[90vh] flex flex-col overflow-hidden p-0" data-testid="costume-form-dialog">
+        <DialogHeader className="p-6 pb-3 shrink-0 border-b border-[#E4E4E7] bg-white">
           <div className="eyebrow">{editing ? "EDIT / RECORD" : "NEW / RECORD"}</div>
           <DialogTitle className="font-display text-2xl tracking-tight">
             {editing ? "Edit Costume" : "Add Costume"}
@@ -568,7 +568,7 @@ export default function CostumeFormDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-6 mt-2">
+        <form onSubmit={handleSubmit} className="space-y-6 p-6 flex-1 overflow-y-auto">
           <div className="grid md:grid-cols-2 gap-5">
             <div className="space-y-2">
               <Label htmlFor="c-name" className="eyebrow">NAME *</Label>

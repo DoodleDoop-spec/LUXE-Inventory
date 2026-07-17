@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Backend API Testing for LUXE Inventory - Iteration 12
-Tests Equipment CRUD and Storage Location Maps
+Backend API Testing for LUXE Inventory - Iteration 13
+Tests MapPin and MapShape location_id linking + negative width/height for lines
 """
 
 import requests
@@ -373,20 +373,178 @@ def test_location_maps(result: TestResult):
         result.record_fail("DELETE /api/locations", del_loc)
 
 
+def test_iteration_13_map_location_linking(result: TestResult):
+    """Test Iteration 13: MapPin and MapShape location_id linking + negative width/height for lines"""
+    print("\n" + "="*80)
+    print("TESTING ITERATION 13: MAP LOCATION LINKING & LINE ROTATION")
+    print("="*80)
+    
+    # Step 1: Create parent location L1
+    l1_payload = {"name": "IterTest Room 1"}
+    success, l1_data = make_request("POST", "/locations", l1_payload)
+    if success:
+        l1_id = l1_data.get("id")
+        result.record_pass("Step 1: POST /api/locations creates parent location L1")
+        print(f"   Created L1: {l1_data['name']} (ID: {l1_id})")
+    else:
+        result.record_fail("Step 1: POST /api/locations (L1)", l1_data)
+        return
+    
+    # Step 2: Create child location L2 with parent_id
+    l2_payload = {"name": "IterTest Rack 1", "parent_id": l1_id}
+    success, l2_data = make_request("POST", "/locations", l2_payload)
+    if success:
+        l2_id = l2_data.get("id")
+        result.record_pass("Step 2: POST /api/locations creates child location L2")
+        print(f"   Created L2: {l2_data['name']} (ID: {l2_id}, parent: {l1_id})")
+    else:
+        result.record_fail("Step 2: POST /api/locations (L2)", l2_data)
+        # Cleanup L1
+        make_request("DELETE", f"/locations/{l1_id}")
+        return
+    
+    # Step 3: PUT floorplan with shapes including location_id and negative width/height
+    floorplan_payload = {
+        "map_mode": "floorplan",
+        "floorplan_shapes": [
+            {
+                "id": "s1",
+                "type": "rect",
+                "x": 100,
+                "y": 100,
+                "width": 200,
+                "height": 100,
+                "label": "Rack A",
+                "location_id": l2_id
+            },
+            {
+                "id": "s2",
+                "type": "line",
+                "x": 50,
+                "y": 50,
+                "width": -100,
+                "height": -80,
+                "label": "Backward line"
+            }
+        ]
+    }
+    success, floor_data = make_request("PUT", f"/locations/{l1_id}/map", floorplan_payload)
+    if success:
+        result.record_pass("Step 3: PUT /api/locations/{id}/map with floorplan mode")
+        
+        # Verify location_id on shape s1
+        shapes = floor_data.get("floorplan_shapes", [])
+        s1 = next((s for s in shapes if s.get("id") == "s1"), None)
+        if s1 and s1.get("location_id") == l2_id:
+            result.record_pass("Step 3a: floorplan_shapes[0].location_id === L2.id")
+            print(f"   ✓ Shape s1 location_id: {s1.get('location_id')}")
+        else:
+            result.record_fail("Step 3a: floorplan_shapes[0].location_id", 
+                             f"Expected {l2_id}, got {s1.get('location_id') if s1 else 'shape not found'}")
+        
+        # Verify negative width/height preserved on line s2
+        s2 = next((s for s in shapes if s.get("id") == "s2"), None)
+        if s2:
+            if s2.get("width") == -100:
+                result.record_pass("Step 3b: floorplan_shapes[1].width === -100 (negative preserved)")
+                print(f"   ✓ Line s2 width: {s2.get('width')}")
+            else:
+                result.record_fail("Step 3b: floorplan_shapes[1].width", 
+                                 f"Expected -100, got {s2.get('width')}")
+            
+            if s2.get("height") == -80:
+                result.record_pass("Step 3c: floorplan_shapes[1].height === -80 (negative preserved)")
+                print(f"   ✓ Line s2 height: {s2.get('height')}")
+            else:
+                result.record_fail("Step 3c: floorplan_shapes[1].height", 
+                                 f"Expected -80, got {s2.get('height')}")
+        else:
+            result.record_fail("Step 3b/c: floorplan_shapes[1]", "Line shape s2 not found in response")
+    else:
+        result.record_fail("Step 3: PUT /api/locations/{id}/map (floorplan)", floor_data)
+    
+    # Step 4: PUT photo mode with pins including location_id
+    photo_payload = {
+        "map_mode": "photo",
+        "map_pins": [
+            {
+                "id": "p1",
+                "x_pct": 30,
+                "y_pct": 40,
+                "label": "Rack area",
+                "location_id": l2_id,
+                "color": "#3B82F6"
+            }
+        ]
+    }
+    success, photo_data = make_request("PUT", f"/locations/{l1_id}/map", photo_payload)
+    if success:
+        result.record_pass("Step 4: PUT /api/locations/{id}/map with photo mode")
+        
+        # Verify location_id on pin p1
+        pins = photo_data.get("map_pins", [])
+        p1 = next((p for p in pins if p.get("id") == "p1"), None)
+        if p1 and p1.get("location_id") == l2_id:
+            result.record_pass("Step 4a: map_pins[0].location_id === L2.id")
+            print(f"   ✓ Pin p1 location_id: {p1.get('location_id')}")
+        else:
+            result.record_fail("Step 4a: map_pins[0].location_id", 
+                             f"Expected {l2_id}, got {p1.get('location_id') if p1 else 'pin not found'}")
+    else:
+        result.record_fail("Step 4: PUT /api/locations/{id}/map (photo)", photo_data)
+    
+    # Step 5: GET location to verify both floorplan_shapes and map_pins are returned with location_id intact
+    success, get_data = make_request("GET", f"/locations/{l1_id}")
+    if success:
+        result.record_pass("Step 5: GET /api/locations/{id} returns location data")
+        
+        # Verify floorplan_shapes with location_id
+        shapes = get_data.get("floorplan_shapes", [])
+        s1 = next((s for s in shapes if s.get("id") == "s1"), None)
+        if s1 and s1.get("location_id") == l2_id:
+            result.record_pass("Step 5a: GET returns floorplan_shapes with location_id intact")
+        else:
+            result.record_fail("Step 5a: GET floorplan_shapes location_id", 
+                             f"Expected {l2_id}, got {s1.get('location_id') if s1 else 'shape not found'}")
+        
+        # Verify map_pins with location_id
+        pins = get_data.get("map_pins", [])
+        p1 = next((p for p in pins if p.get("id") == "p1"), None)
+        if p1 and p1.get("location_id") == l2_id:
+            result.record_pass("Step 5b: GET returns map_pins with location_id intact")
+        else:
+            result.record_fail("Step 5b: GET map_pins location_id", 
+                             f"Expected {l2_id}, got {p1.get('location_id') if p1 else 'pin not found'}")
+    else:
+        result.record_fail("Step 5: GET /api/locations/{id}", get_data)
+    
+    # Step 6: Cleanup - delete both locations (child first, then parent)
+    success, del_l2 = make_request("DELETE", f"/locations/{l2_id}")
+    if success:
+        result.record_pass("Step 6a: DELETE /api/locations (L2)")
+        print(f"   Deleted L2: {l2_id}")
+    else:
+        result.record_fail("Step 6a: DELETE /api/locations (L2)", del_l2)
+    
+    success, del_l1 = make_request("DELETE", f"/locations/{l1_id}")
+    if success:
+        result.record_pass("Step 6b: DELETE /api/locations (L1)")
+        print(f"   Deleted L1: {l1_id}")
+    else:
+        result.record_fail("Step 6b: DELETE /api/locations (L1)", del_l1)
+
+
 def main():
     print("\n" + "="*80)
-    print("LUXE INVENTORY - ITERATION 12 BACKEND TESTING")
+    print("LUXE INVENTORY - ITERATION 13 BACKEND TESTING")
     print("="*80)
     print(f"Backend URL: {BASE_URL}")
     print("="*80)
     
     result = TestResult()
     
-    # Test Equipment CRUD
-    test_equipment_crud(result)
-    
-    # Test Location Maps
-    test_location_maps(result)
+    # Test Iteration 13: Map location linking + negative width/height
+    test_iteration_13_map_location_linking(result)
     
     # Print summary
     print("\n")

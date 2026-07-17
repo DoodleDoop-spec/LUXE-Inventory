@@ -552,7 +552,7 @@ export default function Settings() {
           {showsByYear.length === 0 ? (
             <div className="border border-[#E4E4E7] p-8 text-center text-[#71717A]">No shows yet.</div>
           ) : showsByYear.map(({ year, shows: ys }) => {
-            const yopen = expandedYear[year] !== false;
+            const yopen = expandedYear[year] === true; // default collapsed
             return (
               <div key={year} className="border border-[#E4E4E7]" data-testid={`year-block-${year}`}>
                 <button

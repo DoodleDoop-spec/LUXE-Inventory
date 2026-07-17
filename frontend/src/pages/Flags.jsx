@@ -153,7 +153,7 @@ export default function Flags() {
         <div className="space-y-4">
           {categories.map((fc) => {
             const list = costumesByFc[fc.id] || [];
-            const open = expanded[fc.id] !== false; // default open
+            const open = expanded[fc.id] === true; // default collapsed
             const isEditing = editingId === fc.id;
             return (
               <section key={fc.id} className="border border-[#E4E4E7]" data-testid={`flag-cat-${fc.id}`}>
