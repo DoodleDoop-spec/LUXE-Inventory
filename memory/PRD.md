@@ -30,6 +30,17 @@ A proprietary internal tracking system for costumes/accessories with location tr
 - Wording sweep to "costumes / accessories".
 - Drag & drop on Inventory.
 
+### Iteration 12 — Jul 2026 (this session)
+- **Equipment inventory**: Full CRUD sibling to costumes with its own categories & sorting systems. Backend: `equipment`, `equipment_categories`, `equipment_sorting_systems` collections. New endpoints under `/api/equipment`, `/api/equipment-categories`, `/api/equipment-sorting-systems`, plus `/api/equipment-stats` and `/api/equipment/pinned`. Frontend: new `Equipment.jsx` page with category accordion, `EquipmentFormDialog.jsx` with all the polish (image upload, sorting-system-none flow, keywords, in-use/pin toggles, inline category creation).
+- **Sorting-system display fix**: When a costume/equipment has no sorting system, the size grid + "SYSTEM · Letter" label are hidden. Instead the card shows a big "QUANTITY: N" number.
+- **Storage location maps** (labelable): Every location gets one of three modes:
+  1. `none` — no map (default)
+  2. `photo` — upload a photo (e.g. of a rack); click anywhere to drop numbered pins with editable labels + color; drag to reposition
+  3. `floorplan` — top-down room layout editor. Tools: **rectangle** (racks/tables), **circle** (round tables/columns), **line** (walls/dividers), **text label**. Click-to-place, click-to-select, drag-to-move, corner-drag to resize. SVG canvas with a light grid. Selected shape reveals fill-color palette + label input + delete button.
+- **Boxed collapsible sections**: New reusable `CollapsibleBox` component (accent color left bar, chevron toggle, icon, title/subtitle, right-hand actions). Applied to Categories and Sorting Systems lists in Settings so they now match the Flags visual pattern and are collapsed by default.
+- **Maintenance tab removed**: The old "Migrate legacy flags" tab is gone from Settings. Data migrations continue to run automatically on backend startup.
+- New route `/locations/:id/map` with a "View / edit map" button surfaced on the Storage page.
+
 ### Iteration 11 — Jul 2026 (this session)
 - **Costume form bug fix**: Reset useEffect now depends only on `[open, editing?.id]` — prop refetches (locations/categories/shows after inline creation) no longer wipe user input. Inline subcategory creation auto-selects the new sub without losing other fields.
 - **Sorting system is optional**: New "— None (single total) —" option. When selected, the sizes grid hides and a single TOTAL QUANTITY input replaces it. Persisted via `total_quantity_override` on the API.
