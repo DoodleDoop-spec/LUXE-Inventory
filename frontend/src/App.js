@@ -12,6 +12,7 @@ import ShowDetail from "@/pages/ShowDetail";
 import GroupDetail from "@/pages/GroupDetail";
 import Flags from "@/pages/Flags";
 import Equipment from "@/pages/Equipment";
+import LocationMap from "@/pages/LocationMap";
 import { SettingsProvider } from "@/context/SettingsContext";
 import { ConfirmProvider } from "@/components/ConfirmDialog";
 
@@ -28,6 +29,7 @@ function App() {
                 <Route path="/equipment" element={<Equipment />} />
                 <Route path="/costume/:id" element={<CostumeDetail />} />
                 <Route path="/locations" element={<Locations />} />
+                <Route path="/locations/:id/map" element={<LocationMap />} />
                 <Route path="/shows" element={<Shows />} />
                 <Route path="/shows/:id" element={<ShowDetail />} />
                 <Route path="/group/:id" element={<GroupDetail />} />

@@ -500,3 +500,112 @@ agent_communication_iter11:
          - PUT with hide_in_use_mode="full" → 200, value updated
       
       All backend APIs are functioning correctly. No errors or failures detected.
+
+## Iteration 12 — Jul 2026
+
+user_problem_statement_iter12: |
+  - Equipment inventory (full CRUD like costumes, no shows)
+  - When no sizing system, costume must not display a fake system
+  - Labelable map for each storage location: two modes
+      * Photo + labeled pins (for shelves/racks)
+      * Top-down floorplan with shape tools (rectangles, circles, lines, text) — for rooms
+  - Separators within a tab collapsed by default + boxed like flags
+  - Remove Maintenance tab
+
+backend_tasks_iter12:
+  - task: "Equipment CRUD, categories, sorting systems (separate from costume taxonomy)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          New collections: equipment, equipment_categories, equipment_sorting_systems. Endpoints:
+          - GET/POST/PUT/DELETE /api/equipment
+          - GET /api/equipment-stats
+          - GET /api/equipment/pinned
+          - GET/POST/PUT/DELETE /api/equipment-categories
+          - GET/POST/PUT/DELETE /api/equipment-sorting-systems
+          Payloads mirror costumes minus show fields. total_quantity_override honored when sorting_system is empty. Pinned toggle supported. Delete guards on categories/sorting systems if used.
+      - working: true
+        agent: "testing"
+        comment: |
+          TESTED: All 15 equipment CRUD tests passed. (1) GET /api/equipment returns list (found 1 existing item). (2) POST /api/equipment-categories creates "Electronics" category. (3) POST /api/equipment-sorting-systems creates "Cable Length" system with sizes [short, medium, long]. (4) POST /api/equipment with sorting_system="Cable Length", sizes={short:2, medium:1, long:0}, pinned=true, in_use=true → response has total_quantity=3 (correctly computed), pinned=true, in_use=true. (5) GET /api/equipment/pinned returns the created item. (6) GET /api/equipment-stats returns all required fields: total_pieces, total_items, in_use_count, flagged_count. (7) PUT /api/equipment with sorting_system="" and total_quantity_override=99 → sorting_system cleared to "", sizes cleared to {}, total_quantity=99. (8) DELETE /api/equipment removes item successfully. (9) DELETE /api/equipment-sorting-systems (unused) → 200. (10) DELETE /api/equipment-categories while in use → 409 conflict as expected. All equipment endpoints working correctly.
+
+  - task: "Storage location maps (photo pins + floorplan shapes)"
+    implemented: true
+    working: true
+    file: "backend/server.py"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          PUT /api/locations/{id}/map accepts map_mode ('none'|'photo'|'floorplan'), map_image_id, map_pins (list), floorplan_shapes (list), canvas_width, canvas_height. Rejects invalid map_mode with 400. GET /api/locations/{id} returns location with map defaults filled in.
+      - working: true
+        agent: "testing"
+        comment: |
+          TESTED: All 7 location map tests passed. (1) POST /api/locations creates test location "Test Costume Closet A". (2) PUT /api/locations/{id}/map with map_mode="photo" and map_pins=[{id:"p1", x_pct:10.5, y_pct:20.2, label:"Top shelf", color:"#EF4444"}] → response has map_mode="photo" and pin saved correctly. (3) PUT /api/locations/{id}/map with map_mode="floorplan" and floorplan_shapes=[{id:"s1", type:"rect", x:100, y:100, width:200, height:50, label:"Rack A", fill_color:"#DBEAFE", stroke_color:"#1D4ED8"}] → response has map_mode="floorplan" and shape saved correctly. (4) PUT /api/locations/{id}/map with map_mode="bogus" → 400 error as expected. (5) GET /api/locations/{id} returns all default map fields: map_mode, map_pins, floorplan_shapes, canvas_width (1200), canvas_height (800). (6) DELETE /api/locations cleans up test location. All location map endpoints working correctly.
+
+test_plan_iter12:
+  current_focus:
+    - "Equipment CRUD, categories, sorting systems (separate from costume taxonomy)"
+    - "Storage location maps (photo pins + floorplan shapes)"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication_iter12:
+  - agent: "main"
+    message: |
+      Backend Iteration 12. Please verify (no auth, no test credentials):
+
+      A) Equipment
+      1. GET /api/equipment → 200, list (may already contain a test item from manual verification).
+      2. POST /api/equipment-categories with {"name": "Electronics"} → 200, category created (may conflict 409 if already exists — that's OK, just move on).
+      3. POST /api/equipment-sorting-systems with {"name":"Cable Length","sizes":["short","medium","long"]} → 200.
+      4. POST /api/equipment with name, category="Electronics", location="Backstage", sorting_system="Cable Length", sizes={"short":2,"medium":1,"long":0}, pinned=true, in_use=true, in_use_note="on stage tonight" → 200; total_quantity=3; response.pinned=true, response.in_use=true.
+      5. GET /api/equipment/pinned → contains this item.
+      6. PUT /api/equipment/{id} with {sorting_system:"", total_quantity_override:99} → sizes cleared, total_quantity=99.
+      7. DELETE /api/equipment/{id} → 200, item gone.
+      8. DELETE /api/equipment-sorting-systems/{system_id} while a costume was NOT using it → 200.
+      9. Attempt DELETE /api/equipment-categories/{cat_id} while there is still an item in that category → should 409.
+
+      B) Location maps
+      1. Create a location: POST /api/locations {"name": "Costume Closet A"} → 200, id=L1.
+      2. PUT /api/locations/L1/map with {"map_mode":"photo", "map_image_id":null, "map_pins":[{"id":"p1","x_pct":10.5,"y_pct":20.2,"label":"Top shelf","color":"#EF4444"}]} → 200, response has map_mode="photo" and one pin.
+      3. PUT /api/locations/L1/map with {"map_mode":"floorplan", "floorplan_shapes":[{"id":"s1","type":"rect","x":100,"y":100,"width":200,"height":50,"label":"Rack A","fill_color":"#DBEAFE","stroke_color":"#1D4ED8"}]} → 200, response has map_mode="floorplan" and one shape.
+      4. PUT /api/locations/L1/map with {"map_mode":"bogus"} → 400.
+      5. GET /api/locations/L1 returns object with defaults (map_pins=[], floorplan_shapes=[...], canvas_width, canvas_height).
+      6. Cleanup: DELETE the location after test.
+
+      Please report pass/fail per task. Frontend testing NOT required.
+  - agent: "testing"
+    message: |
+      ✅ ALL ITERATION 12 BACKEND TESTS PASSED (22/22)
+      
+      Completed comprehensive end-to-end testing of both backend tasks:
+      
+      1. ✅ Equipment CRUD (15 tests):
+         - GET /api/equipment returns list (found 1 existing item)
+         - POST /api/equipment-categories creates Electronics category
+         - POST /api/equipment-sorting-systems creates Cable Length system
+         - POST /api/equipment with sorting_system, sizes, pinned, in_use → total_quantity computed correctly (3)
+         - GET /api/equipment/pinned returns pinned items
+         - GET /api/equipment-stats returns all required fields
+         - PUT /api/equipment switches to no sorting_system with total_quantity_override → sizes cleared, total updated to 99
+         - DELETE /api/equipment removes item
+         - DELETE /api/equipment-sorting-systems (unused) → 200
+         - DELETE /api/equipment-categories (in use) → 409 conflict
+      
+      2. ✅ Storage Location Maps (7 tests):
+         - POST /api/locations creates test location
+         - PUT /api/locations/{id}/map with photo mode + pins → saved correctly
+         - PUT /api/locations/{id}/map with floorplan mode + shapes → saved correctly
+         - PUT /api/locations/{id}/map with invalid map_mode → 400 error
+         - GET /api/locations/{id} returns all default map fields
+         - DELETE /api/locations cleans up test location
+      
+      All backend APIs are functioning correctly. No errors or failures detected.

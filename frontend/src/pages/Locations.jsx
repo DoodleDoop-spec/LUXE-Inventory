@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { Link } from "react-router-dom";
-import { Flag } from "lucide-react";
+import { Flag, Map as MapIcon } from "lucide-react";
 import { toast } from "sonner";
 import LocationTree from "@/components/LocationTree";
 
@@ -60,7 +60,18 @@ export default function Locations() {
         </div>
 
         <div className="md:col-span-7">
-          <div className="eyebrow mb-2">{selected ? "CONTAINED / " + selected.path.toUpperCase() : "CONTAINED"}</div>
+          <div className="flex items-center justify-between mb-2 gap-3 flex-wrap">
+            <div className="eyebrow">{selected ? "CONTAINED / " + selected.path.toUpperCase() : "CONTAINED"}</div>
+            {selected && (
+              <Link
+                to={`/locations/${selected.id}/map`}
+                data-testid="location-view-map"
+                className="inline-flex items-center gap-1.5 h-9 px-3 border border-[#09090B] text-[#09090B] hover:bg-[#F4F4F5] text-sm"
+              >
+                <MapIcon className="h-4 w-4" /> View / edit map
+              </Link>
+            )}
+          </div>
           {!selected ? (
             <div className="border border-[#E4E4E7] p-10 text-center text-[#71717A]" data-testid="locations-empty-selection">
               Select a location on the left to view its contents.

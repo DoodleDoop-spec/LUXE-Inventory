@@ -73,7 +73,8 @@ export default function CostumeDetail() {
 
   if (!costume) return <div className="py-20 eyebrow">LOADING…</div>;
 
-  const sys = sizingSystems.find((s) => s.name === (costume.sorting_system || costume.sizing_system || "Letter"));
+  const effectiveSortingSystem = costume.sorting_system || costume.sizing_system || "";
+  const sys = effectiveSortingSystem ? sizingSystems.find((s) => s.name === effectiveSortingSystem) : null;
   const sizeKeys = sys?.sizes || Object.keys(costume.sizes || {});
   // Prefer new `shows` list; fall back to legacy fields
   const costumeShowEntries = (costume.shows && costume.shows.length)
@@ -270,13 +271,16 @@ export default function CostumeDetail() {
             <div className="flex items-baseline justify-between gap-4 flex-wrap">
               <div>
                 <div className="eyebrow">TOTAL QUANTITY</div>
-                <div className="text-xs text-[#71717A] mt-1 font-mono-label">SYSTEM · {costume.sorting_system || costume.sizing_system || "Letter"}</div>
+                {effectiveSortingSystem && (
+                  <div className="text-xs text-[#71717A] mt-1 font-mono-label">SYSTEM · {effectiveSortingSystem}</div>
+                )}
               </div>
               <div className="font-display text-6xl font-bold tabular-nums text-[#09090B]" data-testid="detail-total">
                 {costume.total_quantity}
               </div>
             </div>
-            <div className="divider-thick my-6" />
+            <div className={`divider-thick my-6 ${!effectiveSortingSystem ? "hidden" : ""}`} />
+            {effectiveSortingSystem && (
             <div className={`grid gap-px bg-[#E4E4E7] border border-[#E4E4E7] ${sizeKeys.length > 7 ? "grid-cols-4 sm:grid-cols-6 md:grid-cols-8" : "grid-cols-4 sm:grid-cols-7"}`}>
               {sizeKeys.map((s) => {
                 const qty = costume.sizes?.[s] || 0;
@@ -294,7 +298,8 @@ export default function CostumeDetail() {
                 );
               })}
             </div>
-            {sizeKeys.some((s) => (costume.size_notes?.[s] || "").trim()) && (
+            )}
+            {effectiveSortingSystem && sizeKeys.some((s) => (costume.size_notes?.[s] || "").trim()) && (
               <div className="mt-6 space-y-2" data-testid="detail-size-notes-list">
                 <div className="eyebrow">SIZE-SPECIFIC NOTES</div>
                 {sizeKeys.filter((s) => (costume.size_notes?.[s] || "").trim()).map((s) => (

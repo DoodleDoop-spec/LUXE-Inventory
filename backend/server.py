@@ -1665,6 +1665,472 @@ async def get_image(image_id: str):
     return Response(content=data, media_type=record.get("content_type", content_type))
 
 
+# ==================== EQUIPMENT ====================
+# Equipment is a lightweight sibling to costumes: same feature set minus shows.
+# It has its OWN categories collection and sorting systems collection for full isolation.
+
+class EquipmentBase(BaseModel):
+    name: str
+    category: str
+    subcategory: Optional[str] = ""
+    location: str
+    sub_location: Optional[str] = ""
+    notes: Optional[str] = ""
+    note_image_ids: List[str] = Field(default_factory=list)
+    sorting_system: Optional[str] = ""
+    sizes: Dict[str, int] = Field(default_factory=dict)
+    size_notes: Dict[str, str] = Field(default_factory=dict)
+    keywords: List[str] = Field(default_factory=list)
+    creator: Optional[str] = ""
+    buy_link: Optional[str] = ""
+    in_use: Optional[bool] = False
+    in_use_note: Optional[str] = ""
+    pinned: Optional[bool] = False
+    total_quantity_override: Optional[int] = None
+
+
+class EquipmentCreate(EquipmentBase):
+    image_id: Optional[str] = None
+    is_flagged: Optional[bool] = False
+    flag_reason: Optional[str] = ""
+    flags: Optional[List[Dict]] = None
+
+
+class EquipmentUpdate(BaseModel):
+    name: Optional[str] = None
+    category: Optional[str] = None
+    subcategory: Optional[str] = None
+    location: Optional[str] = None
+    sub_location: Optional[str] = None
+    notes: Optional[str] = None
+    note_image_ids: Optional[List[str]] = None
+    sorting_system: Optional[str] = None
+    sizes: Optional[Dict[str, int]] = None
+    size_notes: Optional[Dict[str, str]] = None
+    keywords: Optional[List[str]] = None
+    creator: Optional[str] = None
+    buy_link: Optional[str] = None
+    image_id: Optional[str] = None
+    is_flagged: Optional[bool] = None
+    flag_reason: Optional[str] = None
+    flags: Optional[List[Dict]] = None
+    in_use: Optional[bool] = None
+    in_use_note: Optional[str] = None
+    pinned: Optional[bool] = None
+    total_quantity_override: Optional[int] = None
+
+
+class Equipment(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    name: str
+    category: str
+    subcategory: str = ""
+    location: str
+    sub_location: str = ""
+    notes: str = ""
+    note_image_ids: List[str] = Field(default_factory=list)
+    sorting_system: str = ""
+    sizes: Dict[str, int]
+    size_notes: Dict[str, str] = Field(default_factory=dict)
+    keywords: List[str] = Field(default_factory=list)
+    creator: str = ""
+    buy_link: str = ""
+    total_quantity: int
+    image_id: Optional[str] = None
+    is_flagged: bool = False
+    flag_reason: str = ""
+    flagged_at: Optional[str] = None
+    flags: List[Dict] = Field(default_factory=list)
+    in_use: bool = False
+    in_use_note: str = ""
+    in_use_since: Optional[str] = None
+    pinned: bool = False
+    created_at: str
+    updated_at: str
+
+
+# ---- Equipment Categories ----
+@api_router.get("/equipment-categories")
+async def list_equipment_categories():
+    docs = await db.equipment_categories.find({}, {"_id": 0}).sort("name", 1).to_list(500)
+    for d in docs:
+        d["subcategories"] = _normalize_subcategories(d.get("subcategories"))
+        d.setdefault("color", "#71717A")
+    return docs
+
+
+@api_router.post("/equipment-categories")
+async def create_equipment_category(payload: LocationCreate):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name required")
+    dupe = await db.equipment_categories.find_one({"name": name})
+    if dupe:
+        raise HTTPException(status_code=409, detail="Category already exists")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "subcategories": [],
+        "color": "#71717A",
+        "created_at": _now_iso(),
+    }
+    await db.equipment_categories.insert_one(dict(doc))
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.put("/equipment-categories/{category_id}")
+async def update_equipment_category(category_id: str, payload: CategoryUpdate):
+    doc = await db.equipment_categories.find_one({"id": category_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Category not found")
+    updates = {}
+    if payload.name is not None:
+        new_name = payload.name.strip()
+        if not new_name:
+            raise HTTPException(status_code=400, detail="Name required")
+        if new_name != doc.get("name"):
+            dupe = await db.equipment_categories.find_one({"name": new_name, "id": {"$ne": category_id}})
+            if dupe:
+                raise HTTPException(status_code=409, detail="Another category has that name")
+            await db.equipment.update_many({"category": doc["name"]}, {"$set": {"category": new_name}})
+            updates["name"] = new_name
+    if payload.color is not None:
+        updates["color"] = payload.color.strip() or "#71717A"
+    if updates:
+        await db.equipment_categories.update_one({"id": category_id}, {"$set": updates})
+    return await db.equipment_categories.find_one({"id": category_id}, {"_id": 0})
+
+
+@api_router.delete("/equipment-categories/{category_id}")
+async def delete_equipment_category(category_id: str):
+    doc = await db.equipment_categories.find_one({"id": category_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Category not found")
+    in_use = await db.equipment.count_documents({"category": doc["name"]})
+    if in_use > 0:
+        raise HTTPException(status_code=409, detail=f"Category is used by {in_use} equipment item(s)")
+    await db.equipment_categories.delete_one({"id": category_id})
+    return {"ok": True}
+
+
+# ---- Equipment Sorting Systems ----
+@api_router.get("/equipment-sorting-systems")
+async def list_equipment_sorting_systems():
+    docs = await db.equipment_sorting_systems.find({}, {"_id": 0}).sort("name", 1).to_list(200)
+    return docs
+
+
+@api_router.post("/equipment-sorting-systems")
+async def create_equipment_sorting_system(payload: SizingSystemPayload):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name required")
+    sizes = [s.strip() for s in (payload.sizes or []) if s and s.strip()]
+    if not sizes:
+        raise HTTPException(status_code=400, detail="At least one value required")
+    dupe = await db.equipment_sorting_systems.find_one({"name": name})
+    if dupe:
+        raise HTTPException(status_code=409, detail="System already exists")
+    doc = {"id": str(uuid.uuid4()), "name": name, "sizes": sizes, "created_at": _now_iso()}
+    await db.equipment_sorting_systems.insert_one(dict(doc))
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.put("/equipment-sorting-systems/{system_id}")
+async def update_equipment_sorting_system(system_id: str, payload: SizingSystemPayload):
+    doc = await db.equipment_sorting_systems.find_one({"id": system_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="System not found")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name required")
+    sizes = [s.strip() for s in (payload.sizes or []) if s and s.strip()]
+    if not sizes:
+        raise HTTPException(status_code=400, detail="At least one value required")
+    if name != doc.get("name"):
+        await db.equipment.update_many({"sorting_system": doc["name"]}, {"$set": {"sorting_system": name}})
+    await db.equipment_sorting_systems.update_one({"id": system_id}, {"$set": {"name": name, "sizes": sizes}})
+    return await db.equipment_sorting_systems.find_one({"id": system_id}, {"_id": 0})
+
+
+@api_router.delete("/equipment-sorting-systems/{system_id}")
+async def delete_equipment_sorting_system(system_id: str):
+    doc = await db.equipment_sorting_systems.find_one({"id": system_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="System not found")
+    in_use = await db.equipment.count_documents({"sorting_system": doc["name"]})
+    if in_use > 0:
+        raise HTTPException(status_code=409, detail=f"Sorting system is used by {in_use} equipment item(s)")
+    await db.equipment_sorting_systems.delete_one({"id": system_id})
+    return {"ok": True}
+
+
+# ---- Equipment CRUD ----
+@api_router.get("/equipment", response_model=List[Equipment])
+async def list_equipment(
+    q: Optional[str] = None,
+    category: Optional[str] = None,
+    location: Optional[str] = None,
+    sort: Optional[str] = "recently_used",
+):
+    query: Dict[str, object] = {}
+    if q:
+        rx = {"$regex": q, "$options": "i"}
+        query["$or"] = [{"name": rx}, {"keywords": rx}, {"creator": rx}, {"notes": rx}]
+    if category:
+        query["category"] = category
+    if location:
+        query["location"] = location
+    sort_map = {
+        "recently_used": ("updated_at", -1),
+        "created_desc": ("created_at", -1),
+        "created_asc": ("created_at", 1),
+        "name_asc": ("name", 1),
+        "name_desc": ("name", -1),
+        "quantity_desc": ("total_quantity", -1),
+        "quantity_asc": ("total_quantity", 1),
+    }
+    field, direction = sort_map.get(sort or "recently_used", ("updated_at", -1))
+    docs = await db.equipment.find(query, {"_id": 0}).sort(field, direction).to_list(5000)
+    return docs
+
+
+@api_router.get("/equipment-stats")
+async def equipment_stats():
+    docs = await db.equipment.find({}, {"_id": 0}).to_list(10000)
+    total_items = sum(d.get("total_quantity", 0) for d in docs)
+    return {
+        "total_pieces": len(docs),
+        "total_items": total_items,
+        "in_use_count": sum(1 for d in docs if d.get("in_use")),
+        "flagged_count": sum(1 for d in docs if d.get("is_flagged")),
+    }
+
+
+@api_router.get("/equipment/pinned", response_model=List[Equipment])
+async def list_pinned_equipment():
+    docs = await db.equipment.find({"pinned": True}, {"_id": 0}).sort("updated_at", -1).to_list(50)
+    return docs
+
+
+@api_router.get("/equipment/{equipment_id}", response_model=Equipment)
+async def get_equipment(equipment_id: str):
+    doc = await db.equipment.find_one({"id": equipment_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+    return doc
+
+
+@api_router.post("/equipment", response_model=Equipment)
+async def create_equipment(payload: EquipmentCreate):
+    now = _now_iso()
+    sizes = {str(k): int(v or 0) for k, v in (payload.sizes or {}).items()}
+    size_notes = {str(k): str(v or "") for k, v in (payload.size_notes or {}).items()}
+    keywords = [k.strip() for k in (payload.keywords or []) if k and k.strip()]
+    sorting_system = (payload.sorting_system or "").strip()
+    if sorting_system:
+        total_qty = _compute_total(sizes)
+    else:
+        total_qty = int(payload.total_quantity_override or 0)
+    flags = []
+    for f in (payload.flags or []):
+        if not isinstance(f, dict) or not f.get("category_id"):
+            continue
+        flags.append({
+            "id": f.get("id") or str(uuid.uuid4()),
+            "category_id": f["category_id"],
+            "note": (f.get("note") or "").strip(),
+            "image_ids": [str(x) for x in (f.get("image_ids") or []) if x],
+            "created_at": f.get("created_at") or now,
+        })
+    is_flagged = bool(payload.is_flagged) or len(flags) > 0
+    flag_reason = (payload.flag_reason or "").strip() if is_flagged else ""
+    if not flag_reason and flags:
+        flag_reason = " · ".join([f["note"] for f in flags if f["note"]])
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name": payload.name.strip(),
+        "category": payload.category.strip(),
+        "subcategory": (payload.subcategory or "").strip(),
+        "location": payload.location.strip(),
+        "sub_location": (payload.sub_location or "").strip(),
+        "notes": (payload.notes or "").strip(),
+        "note_image_ids": [str(x) for x in (payload.note_image_ids or []) if x],
+        "sorting_system": sorting_system,
+        "sizes": sizes,
+        "size_notes": size_notes,
+        "keywords": keywords,
+        "creator": (payload.creator or "").strip(),
+        "buy_link": (payload.buy_link or "").strip(),
+        "total_quantity": total_qty,
+        "image_id": payload.image_id,
+        "is_flagged": is_flagged,
+        "flag_reason": flag_reason,
+        "flagged_at": now if is_flagged else None,
+        "flags": flags,
+        "in_use": bool(payload.in_use),
+        "in_use_note": (payload.in_use_note or "").strip() if payload.in_use else "",
+        "in_use_since": now if payload.in_use else None,
+        "pinned": bool(payload.pinned),
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.equipment.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.put("/equipment/{equipment_id}", response_model=Equipment)
+async def update_equipment(equipment_id: str, payload: EquipmentUpdate):
+    existing = await db.equipment.find_one({"id": equipment_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+    updates = {k: v for k, v in payload.model_dump(exclude_none=True).items()}
+    if "sizes" in updates:
+        sizes = {str(k): int(v or 0) for k, v in (updates["sizes"] or {}).items()}
+        updates["sizes"] = sizes
+        eff_sys = updates.get("sorting_system", existing.get("sorting_system", ""))
+        if eff_sys:
+            updates["total_quantity"] = _compute_total(sizes)
+    if "total_quantity_override" in updates:
+        override = int(updates.pop("total_quantity_override") or 0)
+        eff_sys = updates.get("sorting_system", existing.get("sorting_system", ""))
+        if not eff_sys:
+            updates["total_quantity"] = override
+    if "sorting_system" in updates and not updates["sorting_system"]:
+        updates["sizes"] = {}
+        updates["size_notes"] = {}
+    if "flags" in updates:
+        raw = updates["flags"] or []
+        normalized = []
+        now_ts = _now_iso()
+        for f in raw:
+            if not isinstance(f, dict) or not f.get("category_id"):
+                continue
+            normalized.append({
+                "id": f.get("id") or str(uuid.uuid4()),
+                "category_id": f["category_id"],
+                "note": (f.get("note") or "").strip(),
+                "image_ids": [str(x) for x in (f.get("image_ids") or []) if x],
+                "created_at": f.get("created_at") or now_ts,
+            })
+        updates["flags"] = normalized
+        updates["is_flagged"] = len(normalized) > 0 or updates.get("is_flagged", existing.get("is_flagged", False))
+        if normalized:
+            updates["flagged_at"] = updates.get("flagged_at") or _now_iso()
+            if not updates.get("flag_reason"):
+                updates["flag_reason"] = " · ".join([f["note"] for f in normalized if f["note"]])
+        else:
+            if not updates.get("is_flagged"):
+                updates["flag_reason"] = ""
+                updates["flagged_at"] = None
+    if "in_use" in updates:
+        if updates["in_use"]:
+            if not existing.get("in_use"):
+                updates["in_use_since"] = _now_iso()
+        else:
+            updates["in_use_since"] = None
+            if "in_use_note" not in updates:
+                updates["in_use_note"] = ""
+    if "note_image_ids" in updates:
+        updates["note_image_ids"] = [str(x) for x in (updates["note_image_ids"] or []) if x]
+    updates["updated_at"] = _now_iso()
+    await db.equipment.update_one({"id": equipment_id}, {"$set": updates})
+    return await db.equipment.find_one({"id": equipment_id}, {"_id": 0})
+
+
+@api_router.delete("/equipment/{equipment_id}")
+async def delete_equipment(equipment_id: str):
+    doc = await db.equipment.find_one({"id": equipment_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+    await db.equipment.delete_one({"id": equipment_id})
+    return {"ok": True}
+
+
+# ==================== STORAGE LOCATION MAPS ====================
+# Two supported map modes per location:
+#   - "photo": upload a photo, drop labeled pins on it (great for racks/shelves)
+#   - "floorplan": place labeled shapes (rectangles, circles, lines, text) on a canvas (great for rooms)
+
+
+class MapPin(BaseModel):
+    id: str
+    x_pct: float  # 0-100 (percentage of image width)
+    y_pct: float  # 0-100
+    label: str = ""
+    item_id: Optional[str] = None  # link to a costume or equipment item
+    item_type: Optional[str] = None  # "costume" | "equipment"
+    color: Optional[str] = "#EF4444"
+
+
+class MapShape(BaseModel):
+    id: str
+    type: str  # "rect" | "circle" | "line" | "text"
+    x: float
+    y: float
+    width: float = 0
+    height: float = 0
+    rotation: float = 0
+    label: str = ""
+    fill_color: Optional[str] = "#E5E7EB"
+    stroke_color: Optional[str] = "#09090B"
+    item_id: Optional[str] = None
+    item_type: Optional[str] = None
+
+
+class LocationMapPayload(BaseModel):
+    map_mode: str  # "none" | "photo" | "floorplan"
+    map_image_id: Optional[str] = None
+    map_pins: Optional[List[MapPin]] = None
+    floorplan_shapes: Optional[List[MapShape]] = None
+    canvas_width: Optional[int] = None
+    canvas_height: Optional[int] = None
+
+
+@api_router.put("/locations/{location_id}/map")
+async def update_location_map(location_id: str, payload: LocationMapPayload):
+    doc = await db.locations.find_one({"id": location_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Location not found")
+    if payload.map_mode not in ("none", "photo", "floorplan"):
+        raise HTTPException(status_code=400, detail="map_mode must be one of: none, photo, floorplan")
+    updates = {"map_mode": payload.map_mode}
+    if payload.map_image_id is not None:
+        updates["map_image_id"] = payload.map_image_id or None
+    if payload.map_pins is not None:
+        updates["map_pins"] = [p.model_dump() for p in payload.map_pins]
+    if payload.floorplan_shapes is not None:
+        updates["floorplan_shapes"] = [s.model_dump() for s in payload.floorplan_shapes]
+    if payload.canvas_width is not None:
+        updates["canvas_width"] = int(payload.canvas_width)
+    if payload.canvas_height is not None:
+        updates["canvas_height"] = int(payload.canvas_height)
+    await db.locations.update_one({"id": location_id}, {"$set": updates})
+    updated = await db.locations.find_one({"id": location_id}, {"_id": 0})
+    updated.setdefault("map_mode", "none")
+    updated.setdefault("map_pins", [])
+    updated.setdefault("floorplan_shapes", [])
+    return updated
+
+
+@api_router.get("/locations/{location_id}")
+async def get_location(location_id: str):
+    doc = await db.locations.find_one({"id": location_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Location not found")
+    doc.setdefault("map_mode", "none")
+    doc.setdefault("map_image_id", None)
+    doc.setdefault("map_pins", [])
+    doc.setdefault("floorplan_shapes", [])
+    doc.setdefault("canvas_width", 1200)
+    doc.setdefault("canvas_height", 800)
+    return doc
+
+
 # --------- App Setup ---------
 app.include_router(api_router)
 

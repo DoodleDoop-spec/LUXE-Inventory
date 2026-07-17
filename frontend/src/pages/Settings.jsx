@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo, useRef } from "react";
 import { api } from "@/lib/api";
 import { useSettings } from "@/context/SettingsContext";
 import { useConfirm } from "@/components/ConfirmDialog";
-import { Plus, Trash2, Tag, Save, Ruler, ChevronDown, ChevronRight, X, Film, Upload, Image as ImageIcon, LinkIcon, Settings as SettingsIcon, MapPin, Boxes, Wrench } from "lucide-react";
+import { Plus, Trash2, Tag, Save, Ruler, ChevronDown, ChevronRight, X, Film, Upload, Image as ImageIcon, LinkIcon, Settings as SettingsIcon, MapPin, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,6 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import LocationTree from "@/components/LocationTree";
+import CollapsibleBox from "@/components/CollapsibleBox";
 
 export default function Settings() {
   const { settings: globalSettings, updateSettings: pushSettings, refreshSettings } = useSettings();
@@ -300,9 +301,6 @@ export default function Settings() {
           <TabsTrigger value="shows" data-testid="settings-tab-shows" className="rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-11 px-5 gap-1.5">
             <Film className="h-3.5 w-3.5" /> Shows
           </TabsTrigger>
-          <TabsTrigger value="maintenance" data-testid="settings-tab-maintenance" className="rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-11 px-5 gap-1.5">
-            <Wrench className="h-3.5 w-3.5" /> Maintenance
-          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="general" className="mt-6" data-testid="settings-content-general">
@@ -460,101 +458,71 @@ export default function Settings() {
               <Plus className="h-4 w-4 mr-1" /> Add
             </Button>
           </form>
-          <div className="border border-[#E4E4E7]">
+          <div className="space-y-2">
             {categories.length === 0 ? (
-              <div className="p-8 text-center text-[#71717A]">No categories yet.</div>
-            ) : categories.map((c, idx) => {
-              const isOpen = !!expandedCat[c.id];
+              <div className="p-8 text-center text-[#71717A] border border-[#E4E4E7] bg-white">No categories yet.</div>
+            ) : categories.map((c) => {
               const subs = c.subcategories || [];
+              const color = c.color || "#71717A";
               return (
-                <div key={c.id} data-testid={`cat-row-${c.id}`} className={`${idx !== categories.length - 1 ? "border-b border-[#E4E4E7]" : ""}`}>
-                  <div className="flex items-center justify-between px-5 py-3 hover:bg-[#FAFAFA]">
-                    <button type="button" data-testid={`toggle-cat-${c.id}`} onClick={() => setExpandedCat({ ...expandedCat, [c.id]: !isOpen })} className="flex items-center gap-3 flex-1 text-left">
-                      {isOpen ? <ChevronDown className="h-4 w-4 text-[#71717A]" /> : <ChevronRight className="h-4 w-4 text-[#71717A]" />}
-                      <span
-                        className="w-3.5 h-3.5 border border-[#E4E4E7] shrink-0"
-                        style={{ backgroundColor: c.color || "#71717A" }}
-                        data-testid={`cat-color-swatch-${c.id}`}
-                        aria-label={`Color ${c.color || "#71717A"}`}
-                      />
-                      <Tag className="h-4 w-4 text-[#71717A]" />
-                      <span className="font-medium text-[#09090B]">{c.name}</span>
-                      <span className="text-xs text-[#71717A] ml-2">{subs.length} subcategor{subs.length === 1 ? "y" : "ies"}</span>
-                    </button>
+                <CollapsibleBox
+                  key={c.id}
+                  testId={`cat-row-${c.id}`}
+                  accentColor={color}
+                  icon={<Tag className="h-4 w-4" style={{ color }} />}
+                  title={c.name}
+                  subtitle={`${subs.length} subcategor${subs.length === 1 ? "y" : "ies"}`}
+                  actions={
                     <button data-testid={`delete-cat-${c.id}`} onClick={() => removeCategory(c.id, c.name)} className="text-[#EF4444] hover:bg-[#FEF2F2] p-2" aria-label="Delete category">
                       <Trash2 className="h-4 w-4" />
                     </button>
-                  </div>
-                  {isOpen && (
-                    <div className="bg-[#FAFAFA] border-t border-[#E4E4E7] p-4 space-y-4">
-                      <div>
-                        <Label className="eyebrow">CATEGORY COLOR</Label>
-                        <div className="flex flex-wrap items-center gap-2 mt-2" data-testid={`cat-color-picker-${c.id}`}>
-                          {["#EF4444","#F97316","#F59E0B","#EAB308","#84CC16","#10B981","#14B8A6","#06B6D4","#3B82F6","#6366F1","#8B5CF6","#A855F7","#EC4899","#F43F5E","#71717A"].map((col) => (
-                            <button
-                              key={col}
-                              type="button"
-                              data-testid={`cat-color-${c.id}-${col.replace("#","")}`}
-                              onClick={() => saveCategoryColor(c.id, col)}
-                              className={`w-6 h-6 border-2 ${c.color === col ? "border-[#09090B] scale-110" : "border-transparent hover:border-[#71717A]"}`}
-                              style={{ backgroundColor: col }}
-                              aria-label={`Set color ${col}`}
-                            />
-                          ))}
-                          <input
-                            type="color"
-                            data-testid={`cat-color-picker-input-${c.id}`}
-                            value={c.color || "#71717A"}
-                            onChange={(e) => saveCategoryColor(c.id, e.target.value)}
-                            className="w-8 h-8 border border-[#E4E4E7] cursor-pointer p-0"
-                            aria-label="Custom color"
+                  }
+                >
+                  <div className="space-y-4">
+                    <div>
+                      <Label className="eyebrow">CATEGORY COLOR</Label>
+                      <div className="flex flex-wrap items-center gap-2 mt-2" data-testid={`cat-color-picker-${c.id}`}>
+                        {["#EF4444","#F97316","#F59E0B","#EAB308","#84CC16","#10B981","#14B8A6","#06B6D4","#3B82F6","#6366F1","#8B5CF6","#A855F7","#EC4899","#F43F5E","#71717A"].map((col) => (
+                          <button
+                            key={col}
+                            type="button"
+                            data-testid={`cat-color-${c.id}-${col.replace("#","")}`}
+                            onClick={() => saveCategoryColor(c.id, col)}
+                            className={`w-6 h-6 border-2 ${c.color === col ? "border-[#09090B] scale-110" : "border-transparent hover:border-[#71717A]"}`}
+                            style={{ backgroundColor: col }}
+                            aria-label={`Set color ${col}`}
                           />
-                        </div>
-                        <p className="text-xs text-[#A1A1AA] mt-1.5">Subcategories inherit lighter variations of this color automatically.</p>
+                        ))}
+                        <input
+                          type="color"
+                          data-testid={`cat-color-picker-input-${c.id}`}
+                          value={c.color || "#71717A"}
+                          onChange={(e) => saveCategoryColor(c.id, e.target.value)}
+                          className="w-8 h-8 border border-[#E4E4E7] cursor-pointer p-0"
+                          aria-label="Custom color"
+                        />
                       </div>
-                      <div>
-                        <Label className="eyebrow">SUBCATEGORIES</Label>
-                        <div className="mt-2 space-y-3">
-                          <AddSubcategoryForm catId={c.id} onAdd={(name) => addSubcat(c.id, null, name)} />
-                          <SubcategoryTree
-                            catId={c.id}
-                            nodes={subs}
-                            onAdd={(parentId, name) => addSubcat(c.id, parentId, name)}
-                            onRename={(id, name) => renameSubcat(c.id, id, name)}
-                            onDelete={(id, name, kids) => removeSubcat(c.id, id, name, kids)}
-                          />
-                        </div>
+                      <p className="text-xs text-[#A1A1AA] mt-1.5">Subcategories inherit lighter variations of this color automatically.</p>
+                    </div>
+                    <div>
+                      <Label className="eyebrow">SUBCATEGORIES</Label>
+                      <div className="mt-2 space-y-3">
+                        <AddSubcategoryForm catId={c.id} onAdd={(name) => addSubcat(c.id, null, name)} />
+                        <SubcategoryTree
+                          catId={c.id}
+                          nodes={subs}
+                          onAdd={(parentId, name) => addSubcat(c.id, parentId, name)}
+                          onRename={(id, name) => renameSubcat(c.id, id, name)}
+                          onDelete={(id, name, kids) => removeSubcat(c.id, id, name, kids)}
+                        />
                       </div>
                     </div>
-                  )}
-                </div>
+                  </div>
+                </CollapsibleBox>
               );
             })}
           </div>
           <CategoryMergeCard categories={categories} onMerged={fetchAll} />
-        </div>
-      </section>
-        </TabsContent>
-
-        <TabsContent value="maintenance" className="mt-6" data-testid="settings-content-maintenance">
-      {/* Data maintenance */}
-      <section className="grid md:grid-cols-12 gap-8" data-testid="settings-maintenance">
-        <div className="md:col-span-4">
-          <div className="eyebrow">MAINTENANCE</div>
-          <h2 className="font-display text-xl font-semibold text-[#09090B] mt-2">Data upkeep</h2>
-          <p className="text-sm text-[#71717A] mt-2">
-            One-off actions to keep older data consistent with new features.
-          </p>
-        </div>
-        <div className="md:col-span-8 border border-[#E4E4E7] p-5 space-y-3">
-          <div>
-            <div className="font-display font-semibold text-[#09090B]">Migrate legacy flags</div>
-            <p className="text-sm text-[#71717A] mt-1">
-              Convert any older single-flag costumes into the new multi-flag system so they show up
-              under a &ldquo;Legacy&rdquo; category on the Flags tab.
-            </p>
-          </div>
-          <MigrateLegacyButton />
         </div>
       </section>
         </TabsContent>
@@ -703,15 +671,32 @@ export default function Settings() {
               </Button>
             </div>
           </form>
-          <div className="border border-[#E4E4E7]">
+          <div className="space-y-2">
             {sizingSystems.length === 0 ? (
-              <div className="p-8 text-center text-[#71717A]">No sorting systems yet.</div>
-            ) : sizingSystems.map((s, idx) => (
-              <div key={s.id} data-testid={`sys-row-${s.id}`} className={`${idx !== sizingSystems.length - 1 ? "border-b border-[#E4E4E7]" : ""}`}>
+              <div className="p-8 text-center text-[#71717A] border border-[#E4E4E7] bg-white">No sorting systems yet.</div>
+            ) : sizingSystems.map((s) => (
+              <CollapsibleBox
+                key={s.id}
+                testId={`sys-row-${s.id}`}
+                accentColor="#3B82F6"
+                icon={<Ruler className="h-4 w-4 text-[#3B82F6]" />}
+                title={s.name}
+                subtitle={`${s.sizes.length} value${s.sizes.length === 1 ? "" : "s"} · ${s.sizes.join(", ")}`}
+                actions={
+                  <>
+                    <button data-testid={`edit-sys-${s.id}`} onClick={() => startEditSys(s)} className="text-[#09090B] hover:bg-[#F4F4F5] p-2" aria-label="Edit">
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                    <button data-testid={`delete-sys-${s.id}`} onClick={() => removeSizingSystem(s.id, s.name)} className="text-[#EF4444] hover:bg-[#FEF2F2] p-2" aria-label="Delete sorting system">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </>
+                }
+              >
                 {editingSys === s.id ? (
-                  <div className="p-4 bg-[#FAFAFA] space-y-2">
-                    <Input data-testid={`edit-sys-name-${s.id}`} value={editSysName} onChange={(e) => setEditSysName(e.target.value)} className="h-10 rounded-none border-[#E4E4E7]" />
-                    <Input data-testid={`edit-sys-sizes-${s.id}`} value={editSysSizes} onChange={(e) => setEditSysSizes(e.target.value)} className="h-10 rounded-none border-[#E4E4E7]" />
+                  <div className="space-y-2">
+                    <Input data-testid={`edit-sys-name-${s.id}`} value={editSysName} onChange={(e) => setEditSysName(e.target.value)} className="h-10 rounded-none border-[#E4E4E7] bg-white" placeholder="System name" />
+                    <Input data-testid={`edit-sys-sizes-${s.id}`} value={editSysSizes} onChange={(e) => setEditSysSizes(e.target.value)} className="h-10 rounded-none border-[#E4E4E7] bg-white" placeholder="Values (comma-separated)" />
                     <div className="flex gap-2 justify-end">
                       <Button variant="outline" onClick={() => setEditingSys(null)} className="rounded-none h-9" data-testid={`cancel-edit-sys-${s.id}`}>Cancel</Button>
                       <Button onClick={saveEditSys} className="bg-[#09090B] text-white rounded-none h-9" data-testid={`save-edit-sys-${s.id}`}>
@@ -720,21 +705,13 @@ export default function Settings() {
                     </div>
                   </div>
                 ) : (
-                  <div className="flex items-center justify-between px-5 py-3 hover:bg-[#FAFAFA]">
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <Ruler className="h-4 w-4 text-[#71717A] shrink-0" />
-                      <span className="font-medium text-[#09090B] shrink-0">{s.name}</span>
-                      <span className="font-mono-label text-xs text-[#71717A] truncate">{s.sizes.join(", ")}</span>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button data-testid={`edit-sys-${s.id}`} onClick={() => startEditSys(s)} className="text-xs font-medium text-[#09090B] hover:underline px-2 py-1">Edit</button>
-                      <button data-testid={`delete-sys-${s.id}`} onClick={() => removeSizingSystem(s.id, s.name)} className="text-[#EF4444] hover:bg-[#FEF2F2] p-2" aria-label="Delete sorting system">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {s.sizes.map((v) => (
+                      <span key={v} className="text-xs px-2 py-1 border border-[#E4E4E7] bg-white font-mono-label">{v}</span>
+                    ))}
                   </div>
                 )}
-              </div>
+              </CollapsibleBox>
             ))}
           </div>
         </div>

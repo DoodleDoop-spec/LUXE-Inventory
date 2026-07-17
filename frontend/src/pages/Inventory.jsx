@@ -599,7 +599,8 @@ export default function Inventory() {
 }
 
 function CostumeCard({ costume, onEdit, onDelete, sizingSystems, showsById, categories, onDragStart, onDragEnd, isDragging }) {
-  const sys = sizingSystems.find((s) => s.name === (costume.sorting_system || costume.sizing_system || "Letter"));
+  const effectiveSys = costume.sorting_system || costume.sizing_system || "";
+  const sys = effectiveSys ? sizingSystems.find((s) => s.name === effectiveSys) : null;
   const sizeKeys = sys?.sizes || Object.keys(costume.sizes || {});
   const anySizeNote = sizeKeys.some((s) => (costume.size_notes?.[s] || "").trim());
   const originShow = costume.original_show_id ? showsById?.[costume.original_show_id] : null;
@@ -681,20 +682,29 @@ function CostumeCard({ costume, onEdit, onDelete, sizingSystems, showsById, cate
         </div>
       )}
       <div className="mt-3">
-        <div className="eyebrow text-[9px] mb-1.5">{costume.sorting_system || costume.sizing_system || "Letter"}</div>
-        <div className="flex gap-1 flex-wrap">
-          {sizeKeys.map((s) => {
-            const qty = costume.sizes?.[s] || 0;
-            const hasNote = (costume.size_notes?.[s] || "").trim().length > 0;
-            return (
-              <Badge key={s} variant="outline" className={`rounded-none border ${qty > 0 ? "border-[#09090B] text-[#09090B]" : "border-[#E4E4E7] text-[#A1A1AA]"}`}>
-                <span className="font-mono-label text-[10px]">{s}</span>
-                <span className="tabular-nums text-[10px] ml-1">{qty}</span>
-                {hasNote && <StickyNote className="h-2.5 w-2.5 ml-0.5" />}
-              </Badge>
-            );
-          })}
-        </div>
+        {effectiveSys ? (
+          <>
+            <div className="eyebrow text-[9px] mb-1.5">{effectiveSys}</div>
+            <div className="flex gap-1 flex-wrap">
+              {sizeKeys.map((s) => {
+                const qty = costume.sizes?.[s] || 0;
+                const hasNote = (costume.size_notes?.[s] || "").trim().length > 0;
+                return (
+                  <Badge key={s} variant="outline" className={`rounded-none border ${qty > 0 ? "border-[#09090B] text-[#09090B]" : "border-[#E4E4E7] text-[#A1A1AA]"}`}>
+                    <span className="font-mono-label text-[10px]">{s}</span>
+                    <span className="tabular-nums text-[10px] ml-1">{qty}</span>
+                    {hasNote && <StickyNote className="h-2.5 w-2.5 ml-0.5" />}
+                  </Badge>
+                );
+              })}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="eyebrow text-[9px] mb-1.5">QUANTITY</div>
+            <div className="font-display text-2xl font-bold text-[#09090B] tabular-nums">{costume.total_quantity ?? 0}</div>
+          </>
+        )}
       </div>
       {anySizeNote && (
         <div className="text-[10px] font-mono-label text-[#71717A] mt-2 flex items-center gap-1">
