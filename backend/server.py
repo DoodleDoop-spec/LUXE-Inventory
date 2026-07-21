@@ -2674,6 +2674,7 @@ class Role(BaseModel):
     color: Optional[str] = "#71717A"
     permissions: Dict[str, bool] = {}
     is_system: bool = False
+    org_id: Optional[str] = None
     created_at: str
     updated_at: Optional[str] = None
 
@@ -2732,12 +2733,25 @@ async def list_roles(request: Request):
 
 
 @api_router.post("/roles", response_model=Role)
-async def create_role(payload: RoleCreate):
+async def create_role(payload: RoleCreate, request: Request):
     name = (payload.name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="Role name required")
     slug = _slugify(name)
-    dupe = await db.roles.find_one({"$or": [{"name": name}, {"slug": slug}]})
+    # Scope role to the caller's org so it isn't leaked into other orgs.
+    caller_org_id: Optional[str] = None
+    caller_user_id = getattr(request.state, "session_user_id", None)
+    if caller_user_id:
+        u = await db.users.find_one({"user_id": caller_user_id}, {"_id": 0, "org_id": 1})
+        if u:
+            caller_org_id = u.get("org_id")
+    dupe = await db.roles.find_one({
+        "$and": [
+            {"$or": [{"name": name}, {"slug": slug}]},
+            # Only consider a duplicate within the same org (or globally-unowned for pre-org roles)
+            {"org_id": caller_org_id} if caller_org_id else {"$or": [{"org_id": {"$exists": False}}, {"org_id": None}]},
+        ]
+    })
     if dupe:
         raise HTTPException(status_code=409, detail="A role with that name already exists")
     all_keys = _all_permission_keys()
@@ -2759,6 +2773,7 @@ async def create_role(payload: RoleCreate):
         "color": payload.color or "#71717A",
         "permissions": perms,
         "is_system": False,
+        "org_id": caller_org_id,
         "created_at": now,
         "updated_at": now,
     }
@@ -3215,13 +3230,16 @@ async def _create_new_org(name: str, user_id: str, logo_image_id: Optional[str] 
         "created_at": now,
         "updated_at": now,
     })
-    # Seed the new org's roles by cloning from any existing "template" set:
-    # prefer unowned roles (fresh install), else clone from the Default Org.
-    all_roles = await db.roles.find({"$or": [{"org_id": {"$exists": False}}, {"org_id": None}]}, {"_id": 0}).to_list(500)
+    # Seed the new org's roles by cloning from the Default Organization when it
+    # exists (canonical template). Fallback to unowned roles or preset seeds only
+    # for very early bootstrap. NEVER pull from arbitrary unowned roles once a
+    # Default Org exists — that path leaks custom roles across orgs.
+    default_org = await db.organizations.find_one({"is_default": True, "id": {"$ne": org_id}}, {"_id": 0})
+    all_roles: List[dict] = []
+    if default_org:
+        all_roles = await db.roles.find({"org_id": default_org["id"], "is_system": True}, {"_id": 0}).to_list(500)
     if not all_roles:
-        default_org = await db.organizations.find_one({"is_default": True}, {"_id": 0})
-        if default_org:
-            all_roles = await db.roles.find({"org_id": default_org["id"]}, {"_id": 0}).to_list(500)
+        all_roles = await db.roles.find({"$or": [{"org_id": {"$exists": False}}, {"org_id": None}], "is_system": True}, {"_id": 0}).to_list(500)
     if not all_roles:
         # Absolute fallback — seed presets directly
         for preset in _default_role_presets():

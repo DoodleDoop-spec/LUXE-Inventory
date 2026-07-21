@@ -1,0 +1,33 @@
+{
+  "summary": "Iteration 11 regression re-run after main agent's fix for cross-org role leakage. All 19 iteration_10 tests now PASS (previously 18/19), including the previously-failing TestRoles::test_roles_org_scoped_isolation. Verified via curl that GET /api/roles response now exposes org_id on every role (11/11 roles have org_id set to caller's org). No regressions observed in the auth/students/roles-CRUD/orgs/invites/is_live/map-detach flows. The 4 pre-existing legacy failures in backend_test.py (unrelated schema: original_show_id / additional_show_ids / link_timestamp / groups) are unchanged from iteration_10 and were explicitly scoped out by the request.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "PUT /api/organizations/members/{user_id}/role and POST /api/invites",
+        "issue": "Still do not verify that payload.role_id belongs to caller's org (carry-over review comment from iter10). Not tested this round; low likelihood but same tenant-leakage class as the bug just fixed."
+      }
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration10.py",
+    "/app/test_reports/pytest/iter11_results.xml",
+    "/app/test_reports/pytest/iter11_legacy.xml"
+  ],
+  "action_items": [
+    "None blocking. Optional: add org-scope check on role_id in PUT /organizations/members/{user_id}/role and POST /invites for defense-in-depth.",
+    "Optional: address the 4 pre-existing legacy backend_test.py failures (original_show_id/additional_show_ids removed, link_timestamp key missing, default sort by origin_year_desc, group_full_flow) — pre-existing, not iter11 regressions."
+  ],
+  "critical_code_review_comments": [
+    "Fix looks correct: POST /api/roles now stamps org_id from the authenticated session, _create_new_org clones only from Default Org's is_system=true roles, and Role Pydantic model now surfaces org_id. All three changes are visible in test output and curl inspection.",
+    "server.py is still 3600+ lines — splitting into routers/{auth,roles,orgs,students}.py remains overdue (would have caught the original missing-org_id bug at review time)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "19/19 iter10 tests pass (100%). Legacy suite unchanged: 31/35 pass; 4 pre-existing failures scoped out.", "frontend": "skipped per request"},
+  "test_credentials": "admin@luxe.test / LuxeAdmin!23 (Director of Default Organization).",
+  "seed_data_creation": "Tests create ephemeral TEST_ORG_A_/TEST_ORG_B_ orgs, TEST_ISO_A_ roles, TEST_ users — custom roles cleaned up in finally; users/orgs remain in Mongo (no delete-user API).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Cross-org role isolation fix is verified. Next iteration can safely trust that: (1) POST /api/roles stamps org_id from the caller, (2) new orgs clone only Default Org's is_system=true built-ins, (3) GET /api/roles never leaks other orgs' custom roles. If picking up follow-ups, target the 4 legacy failures in backend_test.py and the role_id-belongs-to-org check in PUT /organizations/members/.../role and POST /invites."
+}
