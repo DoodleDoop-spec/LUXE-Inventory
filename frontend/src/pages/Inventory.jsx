@@ -217,11 +217,11 @@ export default function Inventory() {
     <div className="space-y-8" data-testid="inventory-page">
       <div className="flex items-end justify-between flex-wrap gap-4">
         <div className="space-y-2">
-          <div className="eyebrow">INVENTORY</div>
-          <h1 className="font-display text-4xl sm:text-5xl tracking-tight font-bold text-[#09090B]">
-            Inventory
+          <div className="eyebrow">COSTUMES</div>
+          <h1 className="font-display text-4xl sm:text-5xl xl:text-6xl tracking-tight font-bold text-[#09090B] leading-[1.05]">
+            Costume Inventory
           </h1>
-          <p className="text-sm text-[#71717A]">{costumes.length} {costumes.length === 1 ? "item" : "items"} found</p>
+          <p className="text-sm md:text-base text-[#71717A] max-w-xl">{costumes.length} {costumes.length === 1 ? "item" : "items"} found</p>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex border border-[#E4E4E7]">

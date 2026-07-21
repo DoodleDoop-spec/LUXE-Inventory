@@ -6,6 +6,7 @@ export default function LocationTree(props) {
   const {
     locations, onAdd, onRename, onDelete, onSelect, renderExtras, counts,
     icon: IconComp = MapPin, addChildTitle = "Add nested location", maxDepth = 20,
+    dropTarget = null, onNodeDragOver, onNodeDragLeave, onNodeDrop,
   } = props;
   const countsMap = counts || {};
   const [expanded, setExpanded] = useState({});
@@ -78,9 +79,12 @@ export default function LocationTree(props) {
         return (
           <div key={node.id}>
             <div
-              className="flex items-center px-3 py-2 hover:bg-[#FAFAFA] border-b border-[#E4E4E7] last:border-b-0"
+              className={`flex items-center px-3 py-2 hover:bg-[#FAFAFA] border-b border-[#E4E4E7] last:border-b-0 ${dropTarget === node.id ? "bg-[#DBEAFE] outline outline-2 outline-[#3B82F6]" : ""}`}
               style={{ paddingLeft: (depth * 22 + 12) + "px" }}
               data-testid={"tree-row-" + node.id}
+              onDragOver={onNodeDragOver ? (e) => onNodeDragOver(node, e) : undefined}
+              onDragLeave={onNodeDragLeave ? (e) => onNodeDragLeave(node, e) : undefined}
+              onDrop={onNodeDrop ? (e) => onNodeDrop(node, e) : undefined}
             >
               <button
                 type="button"

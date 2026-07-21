@@ -97,10 +97,10 @@ export default function Equipment() {
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="space-y-2">
           <div className="eyebrow">EQUIPMENT</div>
-          <h1 className="font-display text-4xl sm:text-5xl tracking-tight font-bold text-[#09090B]">
+          <h1 className="font-display text-4xl sm:text-5xl xl:text-6xl tracking-tight font-bold text-[#09090B] leading-[1.05]">
             Equipment Inventory
           </h1>
-          <p className="text-sm text-[#71717A]">
+          <p className="text-sm md:text-base text-[#71717A] max-w-xl">
             Track hardware, tools, cables, mics, and other backstage gear.
           </p>
         </div>

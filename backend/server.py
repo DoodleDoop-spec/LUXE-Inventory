@@ -2093,6 +2093,41 @@ class LocationMapPayload(BaseModel):
     canvas_height: Optional[int] = None
 
 
+class MoveItemPayload(BaseModel):
+    item_id: str
+    item_type: str  # "costume" | "equipment"
+    new_location: str
+    new_sub_location: Optional[str] = ""
+
+
+@api_router.post("/locations/move-item")
+async def move_item_to_location(payload: MoveItemPayload):
+    if payload.item_type not in ("costume", "equipment"):
+        raise HTTPException(status_code=400, detail="item_type must be 'costume' or 'equipment'")
+    coll = db.costumes if payload.item_type == "costume" else db.equipment
+    doc = await coll.find_one({"id": payload.item_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Item not found")
+    old_location = doc.get("location", "")
+    updates = {
+        "location": payload.new_location.strip(),
+        "sub_location": (payload.new_sub_location or "").strip(),
+        "updated_at": _now_iso(),
+    }
+    await coll.update_one({"id": payload.item_id}, {"$set": updates})
+    # Clean up any map pins/shapes referencing this item on the OLD location's map
+    if old_location and old_location != payload.new_location:
+        old_loc = await db.locations.find_one({"name": old_location})
+        if old_loc:
+            pins = [p for p in (old_loc.get("map_pins") or []) if p.get("item_id") != payload.item_id]
+            shapes = [s for s in (old_loc.get("floorplan_shapes") or []) if s.get("item_id") != payload.item_id]
+            await db.locations.update_one(
+                {"id": old_loc["id"]},
+                {"$set": {"map_pins": pins, "floorplan_shapes": shapes}}
+            )
+    return {"ok": True, "old_location": old_location, "new_location": payload.new_location}
+
+
 @api_router.put("/locations/{location_id}/map")
 async def update_location_map(location_id: str, payload: LocationMapPayload):
     doc = await db.locations.find_one({"id": location_id})

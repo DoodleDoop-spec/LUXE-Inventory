@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useMemo } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useConfirm } from "@/components/ConfirmDialog";
-import { ArrowLeft, Upload, Trash2, Save, X, Square, Circle as CircleIcon, Minus, Type, MousePointer2, Image as ImageIcon, MapPin as MapPinIcon } from "lucide-react";
+import { ArrowLeft, Upload, Trash2, Save, X, Square, Circle as CircleIcon, Minus, Type, MousePointer2, Image as ImageIcon, MapPin as MapPinIcon, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
@@ -23,6 +23,7 @@ export default function LocationMap() {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [editMode, setEditMode] = useState(false);
 
   const load = async () => {
     try {
@@ -78,28 +79,57 @@ export default function LocationMap() {
 
   if (!loc) return <div className="p-8 text-center text-[#71717A]">Loading…</div>;
 
+  const parentLoc = loc.parent_id ? allLocations.find((l) => l.id === loc.parent_id) : null;
+  const backTarget = parentLoc ? `/locations/${parentLoc.id}/map` : "/locations";
+  const backLabel = parentLoc ? `Back to ${parentLoc.name}` : "Back to storage";
+
   return (
     <div className="space-y-6" data-testid="location-map-page">
       <div className="flex items-center gap-3 text-sm">
-        <Link to="/locations" className="text-[#71717A] hover:text-[#09090B] inline-flex items-center gap-1">
-          <ArrowLeft className="h-4 w-4" /> Back to storage
+        <Link to={backTarget} data-testid="map-back-link" className="text-[#71717A] hover:text-[#09090B] inline-flex items-center gap-1">
+          <ArrowLeft className="h-4 w-4" /> {backLabel}
         </Link>
       </div>
 
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <div className="eyebrow">STORAGE MAP</div>
+          <div className="eyebrow">STORAGE MAP{editMode ? " · EDITING" : ""}</div>
           <h1 className="font-display text-3xl md:text-4xl font-bold text-[#09090B] mt-2">{loc.path}</h1>
-          <p className="text-sm text-[#71717A] mt-1">Give your storage a visual identity so anyone can find things.</p>
+          <p className="text-sm text-[#71717A] mt-1">
+            {editMode
+              ? "Drag shapes, click a tool, add pins. Save when done."
+              : (mode === "none"
+                  ? "No map set up yet. Click Edit to add one."
+                  : "Click any linked area to open its sublocation map.")}
+          </p>
         </div>
         <div className="flex gap-2">
-          <Button onClick={save} disabled={!dirty || saving} data-testid="map-save-btn" className="bg-[#09090B] hover:bg-[#27272A] rounded-none text-white h-10">
-            <Save className="h-4 w-4 mr-1" /> {saving ? "Saving…" : "Save"}
-          </Button>
+          {editMode ? (
+            <>
+              <Button onClick={save} disabled={!dirty || saving} data-testid="map-save-btn" className="bg-[#09090B] hover:bg-[#27272A] rounded-none text-white h-10">
+                <Save className="h-4 w-4 mr-1" /> {saving ? "Saving…" : "Save"}
+              </Button>
+              <Button variant="outline" onClick={async () => {
+                if (dirty) {
+                  const ok = await confirm({ title: "Discard unsaved changes?", confirmLabel: "Discard", danger: true });
+                  if (!ok) return;
+                  await load();
+                }
+                setEditMode(false);
+              }} data-testid="map-done-btn" className="rounded-none border-[#09090B] h-10">
+                Done
+              </Button>
+            </>
+          ) : (
+            <Button onClick={() => setEditMode(true)} data-testid="map-edit-btn" className="bg-[#09090B] hover:bg-[#27272A] rounded-none text-white h-10">
+              <Pencil className="h-4 w-4 mr-1" /> Edit map
+            </Button>
+          )}
         </div>
       </div>
 
-      {/* Mode selector */}
+      {/* Mode selector — only in edit mode */}
+      {editMode && (
       <div className="grid sm:grid-cols-3 gap-2">
         {[
           { v: "none", label: "No map", desc: "Nothing to see here", icon: X },
@@ -122,6 +152,7 @@ export default function LocationMap() {
           </button>
         ))}
       </div>
+      )}
 
       {mode === "photo" && (
         <PhotoPinEditor
@@ -133,6 +164,7 @@ export default function LocationMap() {
           uploading={uploading}
           childLocations={allLocations.filter((l) => l.parent_id === id)}
           navigate={navigate}
+          editMode={editMode}
         />
       )}
 
@@ -144,6 +176,7 @@ export default function LocationMap() {
           setTool={setTool}
           childLocations={allLocations.filter((l) => l.parent_id === id)}
           navigate={navigate}
+          editMode={editMode}
         />
       )}
     </div>
@@ -151,12 +184,13 @@ export default function LocationMap() {
 }
 
 /* ============= PHOTO + PINS EDITOR ============= */
-function PhotoPinEditor({ imageId, setImageId, pins, setPins, onUpload, uploading, childLocations = [], navigate }) {
+function PhotoPinEditor({ imageId, setImageId, pins, setPins, onUpload, uploading, childLocations = [], navigate, editMode = true }) {
   const imgRef = useRef(null);
   const [selectedPin, setSelectedPin] = useState(null);
   const [dragging, setDragging] = useState(null);
 
   const handleAddPin = (e) => {
+    if (!editMode) return;
     if (!imgRef.current) return;
     if (e.target.closest("[data-pin-marker]")) return;
     const rect = imgRef.current.getBoundingClientRect();
@@ -170,6 +204,12 @@ function PhotoPinEditor({ imageId, setImageId, pins, setPins, onUpload, uploadin
 
   const startDrag = (pinId, e) => {
     e.stopPropagation();
+    if (!editMode) {
+      // In view mode: clicking a linked pin navigates to that sublocation
+      const p = pins.find((x) => x.id === pinId);
+      if (p?.location_id) navigate(`/locations/${p.location_id}/map`);
+      return;
+    }
     setDragging(pinId);
     setSelectedPin(pinId);
   };
@@ -193,6 +233,14 @@ function PhotoPinEditor({ imageId, setImageId, pins, setPins, onUpload, uploadin
   const active = pins.find((p) => p.id === selectedPin);
 
   if (!imageId) {
+    if (!editMode) {
+      return (
+        <div className="border border-[#E4E4E7] bg-[#FAFAFA] p-12 text-center flex flex-col items-center gap-4" data-testid="photo-empty-viewer">
+          <ImageIcon className="h-10 w-10 text-[#71717A]" strokeWidth={1.5} />
+          <p className="text-sm text-[#71717A]">No photo has been uploaded for this location yet. Click Edit map above to add one.</p>
+        </div>
+      );
+    }
     return (
       <div className="border border-[#E4E4E7] bg-[#FAFAFA] p-12 text-center flex flex-col items-center gap-4" data-testid="photo-empty">
         <ImageIcon className="h-10 w-10 text-[#71717A]" strokeWidth={1.5} />
@@ -210,7 +258,8 @@ function PhotoPinEditor({ imageId, setImageId, pins, setPins, onUpload, uploadin
 
   return (
     <div className="grid lg:grid-cols-4 gap-4" data-testid="photo-editor">
-      <div className="lg:col-span-3 space-y-3">
+      <div className={editMode ? "lg:col-span-3 space-y-3" : "lg:col-span-4 space-y-3"}>
+        {editMode && (
         <div className="flex items-center gap-2 flex-wrap">
           <input type="file" accept="image/*" onChange={onUpload} className="hidden" id="map-photo-replace" data-testid="map-photo-replace" />
           <label htmlFor="map-photo-replace" className="cursor-pointer inline-flex items-center gap-2 border border-[#E4E4E7] text-[#09090B] hover:bg-[#F4F4F5] h-9 px-3 text-xs">
@@ -225,12 +274,13 @@ function PhotoPinEditor({ imageId, setImageId, pins, setPins, onUpload, uploadin
           </button>
           <span className="text-xs text-[#71717A] ml-2">Click anywhere on the photo to drop a pin. Drag pins to move them.</span>
         </div>
+        )}
         <div
           onMouseMove={onMove}
           onMouseUp={stopDrag}
           onMouseLeave={stopDrag}
           onClick={handleAddPin}
-          className="relative border border-[#E4E4E7] bg-[#FAFAFA] cursor-crosshair select-none"
+          className={`relative border border-[#E4E4E7] bg-[#FAFAFA] select-none ${editMode ? "cursor-crosshair" : "cursor-default"}`}
           data-testid="photo-canvas"
         >
           <img
@@ -271,6 +321,7 @@ function PhotoPinEditor({ imageId, setImageId, pins, setPins, onUpload, uploadin
         </div>
       </div>
 
+      {editMode && (
       <div className="lg:col-span-1 space-y-3">
         <div className="eyebrow">PINS ({pins.length})</div>
         {pins.length === 0 && (
@@ -331,12 +382,13 @@ function PhotoPinEditor({ imageId, setImageId, pins, setPins, onUpload, uploadin
           ))}
         </div>
       </div>
+      )}
     </div>
   );
 }
 
 /* ============= FLOORPLAN EDITOR ============= */
-function FloorplanEditor({ shapes, setShapes, tool, setTool, childLocations = [], navigate }) {
+function FloorplanEditor({ shapes, setShapes, tool, setTool, childLocations = [], navigate, editMode = true }) {
   const svgRef = useRef(null);
   const [selectedId, setSelectedId] = useState(null);
   const [drag, setDrag] = useState(null); // { id, kind: "move"|"resize", startX, startY, ox, oy, ow, oh }
@@ -366,6 +418,7 @@ function FloorplanEditor({ shapes, setShapes, tool, setTool, childLocations = []
   };
 
   const canvasClick = (e) => {
+    if (!editMode) return;
     if (tool === "select") return;
     const { x, y } = relCoords(e);
     addAt(x, y);
@@ -373,9 +426,46 @@ function FloorplanEditor({ shapes, setShapes, tool, setTool, childLocations = []
 
   const startShapeDrag = (s, kind, e) => {
     e.stopPropagation();
+    if (!editMode) {
+      // In view mode: linked shape → navigate to sublocation
+      if (s.location_id) navigate(`/locations/${s.location_id}/map`);
+      return;
+    }
     const { x, y } = relCoords(e);
     setSelectedId(s.id);
     setDrag({ id: s.id, kind, startX: x, startY: y, ox: s.x, oy: s.y, ow: s.width, oh: s.height });
+  };
+
+  const SNAP_ANGLE_DEG = 5; // snap when within 5° of straight
+  const SNAP_DISTANCE = 12; // snap to another endpoint within 12 units
+
+  const snapLineEndpoint = (fromX, fromY, toX, toY, ignoreId) => {
+    // 1) Endpoint-to-endpoint snap: find nearby line endpoints
+    for (const other of shapes) {
+      if (other.id === ignoreId || other.type !== "line") continue;
+      const candidates = [
+        { x: other.x, y: other.y },
+        { x: other.x + other.width, y: other.y + other.height },
+      ];
+      for (const c of candidates) {
+        const d = Math.hypot(toX - c.x, toY - c.y);
+        if (d < SNAP_DISTANCE) return { x: c.x, y: c.y };
+      }
+    }
+    // 2) Straight-angle snap: 0°, 45°, 90°, 135°, 180°…
+    const dx = toX - fromX;
+    const dy = toY - fromY;
+    if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) return { x: toX, y: toY };
+    const len = Math.hypot(dx, dy);
+    const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+    const snapAngles = [-180, -135, -90, -45, 0, 45, 90, 135, 180];
+    for (const sa of snapAngles) {
+      if (Math.abs(angle - sa) < SNAP_ANGLE_DEG) {
+        const rad = sa * Math.PI / 180;
+        return { x: fromX + Math.cos(rad) * len, y: fromY + Math.sin(rad) * len };
+      }
+    }
+    return { x: toX, y: toY };
   };
 
   const onSvgMove = (e) => {
@@ -387,18 +477,28 @@ function FloorplanEditor({ shapes, setShapes, tool, setTool, childLocations = []
       if (s.id !== drag.id) return s;
       if (drag.kind === "move") return { ...s, x: drag.ox + dx, y: drag.oy + dy };
       if (drag.kind === "resize") {
-        // For lines, allow full 360° (no min-size clamp on abs values)
-        if (s.type === "line") return { ...s, width: drag.ow + dx, height: drag.oh + dy };
+        if (s.type === "line") {
+          // apply snap on the endpoint that is being resized (endpoint2)
+          const p1 = { x: s.x, y: s.y };
+          const raw = { x: drag.ox + drag.ow + dx, y: drag.oy + drag.oh + dy };
+          const snapped = snapLineEndpoint(p1.x, p1.y, raw.x, raw.y, s.id);
+          return { ...s, width: snapped.x - s.x, height: snapped.y - s.y };
+        }
         return { ...s, width: Math.max(10, drag.ow + dx), height: Math.max(10, drag.oh + dy) };
       }
       if (drag.kind === "endpoint1") {
-        // Move start point; keep end point fixed by adjusting x/y and width/height
-        const newX = drag.ox + dx;
-        const newY = drag.oy + dy;
-        return { ...s, x: newX, y: newY, width: (drag.ox + drag.ow) - newX, height: (drag.oy + drag.oh) - newY };
+        // Anchor is endpoint2 = (ox + ow, oy + oh). Snap new endpoint1 relative to it.
+        const anchor = { x: drag.ox + drag.ow, y: drag.oy + drag.oh };
+        const raw = { x: drag.ox + dx, y: drag.oy + dy };
+        const snapped = snapLineEndpoint(anchor.x, anchor.y, raw.x, raw.y, s.id);
+        return { ...s, x: snapped.x, y: snapped.y, width: anchor.x - snapped.x, height: anchor.y - snapped.y };
       }
       if (drag.kind === "endpoint2") {
-        return { ...s, width: drag.ow + dx, height: drag.oh + dy };
+        // Anchor is endpoint1 = (ox, oy). Snap new endpoint2.
+        const anchor = { x: drag.ox, y: drag.oy };
+        const raw = { x: drag.ox + drag.ow + dx, y: drag.oy + drag.oh + dy };
+        const snapped = snapLineEndpoint(anchor.x, anchor.y, raw.x, raw.y, s.id);
+        return { ...s, width: snapped.x - anchor.x, height: snapped.y - anchor.y };
       }
       return s;
     }));
@@ -417,6 +517,7 @@ function FloorplanEditor({ shapes, setShapes, tool, setTool, childLocations = []
 
   return (
     <div className="space-y-3" data-testid="floorplan-editor">
+      {editMode && (
       <div className="border border-[#E4E4E7] bg-white p-2 flex items-center gap-1 flex-wrap">
         {[
           { v: "select", label: "Select", icon: MousePointer2 },
@@ -440,13 +541,14 @@ function FloorplanEditor({ shapes, setShapes, tool, setTool, childLocations = []
           {tool === "select" ? "Click a shape to select. Drag to move. Drag corner to resize." : `Click on canvas to place a ${tool}.`}
         </div>
       </div>
+      )}
 
       <div className="grid lg:grid-cols-4 gap-3">
-        <div className="lg:col-span-3">
+        <div className={editMode ? "lg:col-span-3" : "lg:col-span-4"}>
           <svg
             ref={svgRef}
             viewBox={`0 0 ${CANVAS_W} ${CANVAS_H}`}
-            className={`w-full h-auto border border-[#E4E4E7] bg-[#FAFAFA] ${tool === "select" ? "cursor-default" : "cursor-crosshair"}`}
+            className={`w-full h-auto border border-[#E4E4E7] bg-[#FAFAFA] ${editMode ? (tool === "select" ? "cursor-default" : "cursor-crosshair") : "cursor-pointer"}`}
             onClick={canvasClick}
             onMouseMove={onSvgMove}
             onMouseUp={endDrag}
@@ -538,6 +640,7 @@ function FloorplanEditor({ shapes, setShapes, tool, setTool, childLocations = []
         </div>
 
         {/* Properties panel */}
+        {editMode && (
         <div className="lg:col-span-1 space-y-3">
           <div className="eyebrow">SHAPES ({shapes.length})</div>
           {!selected ? (
@@ -620,6 +723,7 @@ function FloorplanEditor({ shapes, setShapes, tool, setTool, childLocations = []
             ))}
           </div>
         </div>
+        )}
       </div>
     </div>
   );

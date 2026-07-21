@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo, useRef } from "react";
 import { api } from "@/lib/api";
 import { useSettings } from "@/context/SettingsContext";
 import { useConfirm } from "@/components/ConfirmDialog";
-import { Plus, Trash2, Tag, Save, Ruler, ChevronDown, ChevronRight, X, Film, Upload, Image as ImageIcon, LinkIcon, Settings as SettingsIcon, MapPin, Pencil } from "lucide-react";
+import { Plus, Trash2, Tag, Save, Ruler, ChevronDown, ChevronRight, X, Film, Upload, Image as ImageIcon, LinkIcon, Settings as SettingsIcon, MapPin, Pencil, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -278,7 +278,7 @@ export default function Settings() {
     <div className="space-y-12" data-testid="settings-page">
       <div className="space-y-2">
         <div className="eyebrow">SETTINGS</div>
-        <h1 className="font-display text-4xl sm:text-5xl tracking-tight font-bold text-[#09090B]">Settings</h1>
+        <h1 className="font-display text-4xl sm:text-5xl xl:text-6xl tracking-tight font-bold text-[#09090B] leading-[1.05]">Settings</h1>
         <p className="text-sm text-[#71717A] max-w-2xl">
           Manage locations, categories &amp; subcategories, sizing systems, shows, and preferences.
         </p>
@@ -297,6 +297,9 @@ export default function Settings() {
           </TabsTrigger>
           <TabsTrigger value="sorting" data-testid="settings-tab-sorting" className="rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-11 px-5 gap-1.5">
             <Ruler className="h-3.5 w-3.5" /> Sorting Systems
+          </TabsTrigger>
+          <TabsTrigger value="equipment" data-testid="settings-tab-equipment" className="rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-11 px-5 gap-1.5">
+            <Wrench className="h-3.5 w-3.5" /> Equipment
           </TabsTrigger>
           <TabsTrigger value="shows" data-testid="settings-tab-shows" className="rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-11 px-5 gap-1.5">
             <Film className="h-3.5 w-3.5" /> Shows
@@ -527,7 +530,12 @@ export default function Settings() {
       </section>
         </TabsContent>
 
+        <TabsContent value="equipment" className="mt-6" data-testid="settings-content-equipment">
+          <EquipmentTaxonomySection />
+        </TabsContent>
+
         <TabsContent value="shows" className="mt-6" data-testid="settings-content-shows">
+
       {/* Shows grouped by year */}
       <section className="grid md:grid-cols-12 gap-8">
         <div className="md:col-span-4">
@@ -875,6 +883,161 @@ function MigrateLegacyButton() {
           MIGRATED {result.migrated} COSTUME(S)
         </span>
       )}
+    </div>
+  );
+}
+
+function EquipmentTaxonomySection() {
+  const confirmDlg = useConfirm();
+  const [cats, setCats] = useState([]);
+  const [sys, setSys] = useState([]);
+  const [newCat, setNewCat] = useState("");
+  const [newSysName, setNewSysName] = useState("");
+  const [newSysSizes, setNewSysSizes] = useState("");
+  const [editSysId, setEditSysId] = useState(null);
+  const [editSysName, setEditSysName] = useState("");
+  const [editSysSizes, setEditSysSizes] = useState("");
+
+  const load = async () => {
+    const [c, s] = await Promise.all([
+      api.get("/equipment-categories"),
+      api.get("/equipment-sorting-systems"),
+    ]);
+    setCats(c.data);
+    setSys(s.data);
+  };
+  useEffect(() => { load(); }, []);
+
+  const addCat = async (e) => {
+    e.preventDefault();
+    const name = newCat.trim();
+    if (!name) return;
+    try { await api.post("/equipment-categories", { name }); toast.success("Category added"); setNewCat(""); load(); }
+    catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
+  };
+  const delCat = async (c) => {
+    if (!(await confirmDlg({ title: `Delete equipment category "${c.name}"?`, danger: true, confirmLabel: "Delete" }))) return;
+    try { await api.delete(`/equipment-categories/${c.id}`); toast.success("Deleted"); load(); }
+    catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
+  };
+
+  const addSys = async (e) => {
+    e.preventDefault();
+    const name = newSysName.trim();
+    const sizes = newSysSizes.split(",").map((s) => s.trim()).filter(Boolean);
+    if (!name || !sizes.length) { toast.error("Name + at least one value"); return; }
+    try { await api.post("/equipment-sorting-systems", { name, sizes }); toast.success("Sorting system added"); setNewSysName(""); setNewSysSizes(""); load(); }
+    catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
+  };
+  const startEditSys = (s) => { setEditSysId(s.id); setEditSysName(s.name); setEditSysSizes(s.sizes.join(", ")); };
+  const saveEditSys = async () => {
+    const sizes = editSysSizes.split(",").map((s) => s.trim()).filter(Boolean);
+    if (!editSysName.trim() || !sizes.length) { toast.error("Invalid"); return; }
+    try { await api.put(`/equipment-sorting-systems/${editSysId}`, { name: editSysName.trim(), sizes }); toast.success("Saved"); setEditSysId(null); load(); }
+    catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
+  };
+  const delSys = async (s) => {
+    if (!(await confirmDlg({ title: `Delete sorting system "${s.name}"?`, danger: true, confirmLabel: "Delete" }))) return;
+    try { await api.delete(`/equipment-sorting-systems/${s.id}`); toast.success("Deleted"); load(); }
+    catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
+  };
+
+  return (
+    <div className="space-y-10" data-testid="equipment-taxonomy">
+      <section className="grid md:grid-cols-12 gap-8">
+        <div className="md:col-span-4">
+          <div className="eyebrow">EQUIPMENT / TAXONOMY</div>
+          <h2 className="font-display text-xl font-semibold text-[#09090B] mt-2">Equipment categories</h2>
+          <p className="text-sm text-[#71717A] mt-2">A separate list of categories for hardware, cables, mics, tools, etc.</p>
+        </div>
+        <div className="md:col-span-8 space-y-4">
+          <form onSubmit={addCat} className="border border-[#E4E4E7] p-4 flex gap-3">
+            <Input data-testid="settings-eq-new-category" placeholder="New equipment category" value={newCat} onChange={(e) => setNewCat(e.target.value)} className="h-11 rounded-none border-[#E4E4E7]" />
+            <Button data-testid="settings-eq-add-category-btn" type="submit" className="bg-[#09090B] text-white hover:bg-[#27272A] rounded-none h-10 px-4">
+              <Plus className="h-4 w-4 mr-1" /> Add
+            </Button>
+          </form>
+          <div className="space-y-2">
+            {cats.length === 0 ? (
+              <div className="p-8 text-center text-[#71717A] border border-[#E4E4E7] bg-white">No equipment categories yet.</div>
+            ) : cats.map((c) => (
+              <CollapsibleBox
+                key={c.id}
+                testId={`eq-cat-row-${c.id}`}
+                accentColor={c.color || "#71717A"}
+                icon={<Wrench className="h-4 w-4" style={{ color: c.color || "#71717A" }} />}
+                title={c.name}
+                subtitle="Equipment"
+                actions={
+                  <button data-testid={`delete-eq-cat-${c.id}`} onClick={() => delCat(c)} className="text-[#EF4444] hover:bg-[#FEF2F2] p-2" aria-label="Delete">
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                }
+              >
+                <p className="text-xs text-[#71717A]">Equipment subcategories aren&apos;t supported yet — this list is flat.</p>
+              </CollapsibleBox>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="grid md:grid-cols-12 gap-8">
+        <div className="md:col-span-4">
+          <div className="eyebrow">EQUIPMENT / SORTING</div>
+          <h2 className="font-display text-xl font-semibold text-[#09090B] mt-2">Equipment sorting systems</h2>
+          <p className="text-sm text-[#71717A] mt-2">Break equipment down by lengths, sizes, colors, positions — anything.</p>
+        </div>
+        <div className="md:col-span-8 space-y-4">
+          <form onSubmit={addSys} className="border border-[#E4E4E7] p-4 grid md:grid-cols-2 gap-3">
+            <Input data-testid="settings-eq-new-sys-name" placeholder="System name" value={newSysName} onChange={(e) => setNewSysName(e.target.value)} className="h-11 rounded-none border-[#E4E4E7]" />
+            <Input data-testid="settings-eq-new-sys-sizes" placeholder="Values, comma-separated" value={newSysSizes} onChange={(e) => setNewSysSizes(e.target.value)} className="h-11 rounded-none border-[#E4E4E7]" />
+            <div className="md:col-span-2 flex justify-end">
+              <Button data-testid="settings-eq-add-sys-btn" type="submit" className="bg-[#09090B] text-white hover:bg-[#27272A] rounded-none h-10 px-4">
+                <Plus className="h-4 w-4 mr-1" /> Add
+              </Button>
+            </div>
+          </form>
+          <div className="space-y-2">
+            {sys.length === 0 ? (
+              <div className="p-8 text-center text-[#71717A] border border-[#E4E4E7] bg-white">No sorting systems yet.</div>
+            ) : sys.map((s) => (
+              <CollapsibleBox
+                key={s.id}
+                testId={`eq-sys-row-${s.id}`}
+                accentColor="#3B82F6"
+                icon={<Ruler className="h-4 w-4 text-[#3B82F6]" />}
+                title={s.name}
+                subtitle={`${s.sizes.length} value${s.sizes.length === 1 ? "" : "s"} · ${s.sizes.join(", ")}`}
+                actions={
+                  <>
+                    <button data-testid={`edit-eq-sys-${s.id}`} onClick={() => startEditSys(s)} className="text-[#09090B] hover:bg-[#F4F4F5] p-2" aria-label="Edit"><Pencil className="h-4 w-4" /></button>
+                    <button data-testid={`delete-eq-sys-${s.id}`} onClick={() => delSys(s)} className="text-[#EF4444] hover:bg-[#FEF2F2] p-2" aria-label="Delete"><Trash2 className="h-4 w-4" /></button>
+                  </>
+                }
+              >
+                {editSysId === s.id ? (
+                  <div className="space-y-2">
+                    <Input value={editSysName} onChange={(e) => setEditSysName(e.target.value)} className="h-10 rounded-none border-[#E4E4E7] bg-white" placeholder="System name" />
+                    <Input value={editSysSizes} onChange={(e) => setEditSysSizes(e.target.value)} className="h-10 rounded-none border-[#E4E4E7] bg-white" placeholder="Values (comma-separated)" />
+                    <div className="flex gap-2 justify-end">
+                      <Button variant="outline" onClick={() => setEditSysId(null)} className="rounded-none h-9">Cancel</Button>
+                      <Button onClick={saveEditSys} className="bg-[#09090B] text-white rounded-none h-9">
+                        <Save className="h-4 w-4 mr-1" /> Save
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {s.sizes.map((v) => (
+                      <span key={v} className="text-xs px-2 py-1 border border-[#E4E4E7] bg-white font-mono-label">{v}</span>
+                    ))}
+                  </div>
+                )}
+              </CollapsibleBox>
+            ))}
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

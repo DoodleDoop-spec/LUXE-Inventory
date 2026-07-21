@@ -2,10 +2,11 @@ import { Outlet, NavLink, Link, useLocation, useNavigate } from "react-router-do
 import { useState, useEffect, useRef } from "react";
 import { useSettings } from "@/context/SettingsContext";
 import { LayoutDashboard, Package, MapPin, Settings as SettingsIcon, Search, X, Film, Flag, Menu, Wrench } from "lucide-react";
+import HangerIcon from "@/components/HangerIcon";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, testId: "nav-dashboard" },
-  { to: "/inventory", label: "Inventory", icon: Package, testId: "nav-inventory" },
+  { to: "/inventory", label: "Costumes", icon: HangerIcon, testId: "nav-inventory" },
   { to: "/equipment", label: "Equipment", icon: Wrench, testId: "nav-equipment" },
   { to: "/shows", label: "Shows", icon: Film, testId: "nav-shows" },
   { to: "/locations", label: "Storage", icon: MapPin, testId: "nav-locations" },

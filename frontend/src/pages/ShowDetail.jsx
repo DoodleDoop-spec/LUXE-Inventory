@@ -227,7 +227,7 @@ export default function ShowDetail() {
         </div>
         <div className="md:col-span-7">
           <div className="eyebrow">SHOW</div>
-          <h1 className="font-display text-4xl sm:text-5xl tracking-tight font-bold text-[#09090B] mt-2" data-testid="show-name">
+          <h1 className="font-display text-4xl sm:text-5xl xl:text-6xl tracking-tight font-bold text-[#09090B] leading-[1.05] mt-2" data-testid="show-name">
             {show.name}
           </h1>
           {show.year != null && (

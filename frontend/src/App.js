@@ -15,6 +15,7 @@ import Equipment from "@/pages/Equipment";
 import LocationMap from "@/pages/LocationMap";
 import { SettingsProvider } from "@/context/SettingsContext";
 import { ConfirmProvider } from "@/components/ConfirmDialog";
+import ScrollToTop from "@/components/ScrollToTop";
 
 function App() {
   return (
@@ -22,6 +23,7 @@ function App() {
       <SettingsProvider>
         <ConfirmProvider>
           <BrowserRouter>
+            <ScrollToTop />
             <Routes>
               <Route element={<Layout />}>
                 <Route path="/" element={<Dashboard />} />

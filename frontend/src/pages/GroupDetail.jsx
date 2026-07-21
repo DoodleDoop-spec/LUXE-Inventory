@@ -58,7 +58,7 @@ export default function GroupDetail() {
               GROUP · {group.category}
               {group.subcategory ? ` · ${group.subcategory}` : ""}
             </div>
-            <h1 className="font-display text-4xl sm:text-5xl tracking-tight font-bold text-[#09090B] mt-2" data-testid="group-name">
+            <h1 className="font-display text-4xl sm:text-5xl xl:text-6xl tracking-tight font-bold text-[#09090B] leading-[1.05] mt-2" data-testid="group-name">
               {group.name}
             </h1>
             {group.location && (

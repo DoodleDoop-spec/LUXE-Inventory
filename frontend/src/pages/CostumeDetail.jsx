@@ -182,7 +182,7 @@ export default function CostumeDetail() {
               {costume.category}
               {costume.subcategory ? <span className="text-[#09090B] normal-case tracking-normal"> · {costume.subcategory}</span> : null}
             </div>
-            <h1 className="font-display text-4xl sm:text-5xl tracking-tight font-bold text-[#09090B] mt-2" data-testid="detail-name">
+            <h1 className="font-display text-4xl sm:text-5xl xl:text-6xl tracking-tight font-bold text-[#09090B] leading-[1.05] mt-2" data-testid="detail-name">
               {costume.name}
             </h1>
             <div className="flex items-center flex-wrap gap-4 mt-3 text-[#52525B]">

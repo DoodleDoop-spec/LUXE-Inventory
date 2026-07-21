@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Backend API Testing for LUXE Inventory - Iteration 13
-Tests MapPin and MapShape location_id linking + negative width/height for lines
+Backend API Testing for LUXE Inventory - Iteration 15
+Tests POST /api/locations/move-item endpoint
 """
 
 import requests
@@ -61,7 +61,7 @@ def make_request(method: str, endpoint: str, data: Optional[Dict] = None, expect
         
         try:
             return True, resp.json()
-        except:
+        except Exception:
             return True, resp.text
     except Exception as e:
         return False, f"Request failed: {str(e)}"
@@ -534,17 +534,215 @@ def test_iteration_13_map_location_linking(result: TestResult):
         result.record_fail("Step 6b: DELETE /api/locations (L1)", del_l1)
 
 
+def test_iteration_15_move_item(result: TestResult):
+    """Test POST /api/locations/move-item endpoint"""
+    print("\n" + "="*80)
+    print("TESTING ITERATION 15: POST /api/locations/move-item")
+    print("="*80)
+    
+    # Step 1: Create location LA (MoveTest A)
+    success, la_data = make_request("POST", "/locations", {"name": "MoveTest A"})
+    if not success:
+        result.record_fail("Step 1: POST /api/locations (MoveTest A)", la_data)
+        return
+    la_id = la_data.get("id")
+    result.record_pass("Step 1: Created location LA 'MoveTest A'")
+    print(f"   LA ID: {la_id}")
+    
+    # Step 2: Create location LB (MoveTest B)
+    success, lb_data = make_request("POST", "/locations", {"name": "MoveTest B"})
+    if not success:
+        result.record_fail("Step 2: POST /api/locations (MoveTest B)", lb_data)
+        # Cleanup LA
+        make_request("DELETE", f"/locations/{la_id}")
+        return
+    lb_id = lb_data.get("id")
+    result.record_pass("Step 2: Created location LB 'MoveTest B'")
+    print(f"   LB ID: {lb_id}")
+    
+    # Step 3: Create a costume at location MoveTest A
+    costume_payload = {
+        "name": "MoveTestCostume",
+        "category": "Testing",
+        "location": "MoveTest A",
+        "sorting_system": "",
+        "total_quantity_override": 1
+    }
+    success, costume_data = make_request("POST", "/costumes", costume_payload)
+    if not success:
+        result.record_fail("Step 3: POST /api/costumes", costume_data)
+        # Cleanup locations
+        make_request("DELETE", f"/locations/{la_id}")
+        make_request("DELETE", f"/locations/{lb_id}")
+        return
+    costume_id = costume_data.get("id")
+    result.record_pass("Step 3: Created costume 'MoveTestCostume' at MoveTest A")
+    print(f"   Costume ID: {costume_id}")
+    
+    # Step 4: Add a map pin to LA referencing the costume
+    map_payload = {
+        "map_mode": "photo",
+        "map_pins": [{
+            "id": "pin1",
+            "x_pct": 10,
+            "y_pct": 10,
+            "label": "here",
+            "item_id": costume_id,
+            "item_type": "costume",
+            "color": "#EF4444"
+        }]
+    }
+    success, map_data = make_request("PUT", f"/locations/{la_id}/map", map_payload)
+    if not success:
+        result.record_fail("Step 4: PUT /api/locations/{LA}/map", map_data)
+        # Cleanup
+        make_request("DELETE", f"/costumes/{costume_id}")
+        make_request("DELETE", f"/locations/{la_id}")
+        make_request("DELETE", f"/locations/{lb_id}")
+        return
+    
+    # Verify pin was added
+    pins = map_data.get("map_pins", [])
+    if len(pins) == 1 and pins[0].get("item_id") == costume_id:
+        result.record_pass("Step 4: Added map pin to LA referencing costume")
+        print(f"   Pin added with item_id: {costume_id}")
+    else:
+        result.record_fail("Step 4: Verify map pin", f"Expected 1 pin with item_id={costume_id}, got {len(pins)} pins")
+    
+    # Step 5: POST /api/locations/move-item to move costume from A to B
+    move_payload = {
+        "item_id": costume_id,
+        "item_type": "costume",
+        "new_location": "MoveTest B",
+        "new_sub_location": "Shelf 3"
+    }
+    success, move_data = make_request("POST", "/locations/move-item", move_payload)
+    if not success:
+        result.record_fail("Step 5: POST /api/locations/move-item", move_data)
+    else:
+        # Verify response
+        if (move_data.get("old_location") == "MoveTest A" and 
+            move_data.get("new_location") == "MoveTest B"):
+            result.record_pass("Step 5: POST /api/locations/move-item successful")
+            print(f"   old_location: {move_data.get('old_location')}")
+            print(f"   new_location: {move_data.get('new_location')}")
+        else:
+            result.record_fail("Step 5: Verify move-item response", 
+                             f"Expected old_location='MoveTest A', new_location='MoveTest B', got {move_data}")
+    
+    # Step 6: GET costume and verify location updated
+    success, costume_get = make_request("GET", f"/costumes/{costume_id}")
+    if not success:
+        result.record_fail("Step 6: GET /api/costumes/{id}", costume_get)
+    else:
+        if (costume_get.get("location") == "MoveTest B" and 
+            costume_get.get("sub_location") == "Shelf 3"):
+            result.record_pass("Step 6: Costume location updated to 'MoveTest B', sub_location='Shelf 3'")
+            print(f"   location: {costume_get.get('location')}")
+            print(f"   sub_location: {costume_get.get('sub_location')}")
+        else:
+            result.record_fail("Step 6: Verify costume location", 
+                             f"Expected location='MoveTest B', sub_location='Shelf 3', got location='{costume_get.get('location')}', sub_location='{costume_get.get('sub_location')}'")
+    
+    # Step 7: GET LA and verify map pin was auto-removed
+    success, la_get = make_request("GET", f"/locations/{la_id}")
+    if not success:
+        result.record_fail("Step 7: GET /api/locations/{LA}", la_get)
+    else:
+        pins = la_get.get("map_pins", [])
+        if len(pins) == 0:
+            result.record_pass("Step 7: Map pin auto-removed from LA (length=0)")
+            print(f"   map_pins length: {len(pins)}")
+        else:
+            result.record_fail("Step 7: Verify map pin removed", 
+                             f"Expected 0 pins, got {len(pins)} pins: {pins}")
+    
+    # Step 8: Negative test - invalid item_type
+    invalid_type_payload = {
+        "item_id": costume_id,
+        "item_type": "bogus",
+        "new_location": "anywhere"
+    }
+    success, error_data = make_request("POST", "/locations/move-item", invalid_type_payload, expected_status=400)
+    if success:
+        result.record_pass("Step 8: POST /api/locations/move-item with invalid item_type returns 400")
+        print(f"   Error response: {error_data}")
+    else:
+        result.record_fail("Step 8: Invalid item_type should return 400", error_data)
+    
+    # Step 9: Negative test - non-existent item
+    nonexistent_payload = {
+        "item_id": "does-not-exist",
+        "item_type": "costume",
+        "new_location": "X"
+    }
+    success, error_data = make_request("POST", "/locations/move-item", nonexistent_payload, expected_status=404)
+    if success:
+        result.record_pass("Step 9: POST /api/locations/move-item with non-existent item returns 404")
+        print(f"   Error response: {error_data}")
+    else:
+        result.record_fail("Step 9: Non-existent item should return 404", error_data)
+    
+    # Step 10: Cleanup - delete costume and locations
+    success, del_costume = make_request("DELETE", f"/costumes/{costume_id}")
+    if success:
+        result.record_pass("Step 10a: DELETE /api/costumes (cleanup)")
+        print(f"   Deleted costume: {costume_id}")
+    else:
+        result.record_fail("Step 10a: DELETE costume", del_costume)
+    
+    success, del_la = make_request("DELETE", f"/locations/{la_id}")
+    if success:
+        result.record_pass("Step 10b: DELETE /api/locations LA (cleanup)")
+        print(f"   Deleted LA: {la_id}")
+    else:
+        result.record_fail("Step 10b: DELETE location LA", del_la)
+    
+    success, del_lb = make_request("DELETE", f"/locations/{lb_id}")
+    if success:
+        result.record_pass("Step 10c: DELETE /api/locations LB (cleanup)")
+        print(f"   Deleted LB: {lb_id}")
+    else:
+        result.record_fail("Step 10c: DELETE location LB", del_lb)
+
+
+def test_smoke_equipment_endpoints(result: TestResult):
+    """Smoke test for equipment categories and sorting systems"""
+    print("\n" + "="*80)
+    print("SMOKE TEST: Equipment Categories and Sorting Systems")
+    print("="*80)
+    
+    # GET /api/equipment-categories
+    success, cat_data = make_request("GET", "/equipment-categories")
+    if success:
+        result.record_pass("Smoke: GET /api/equipment-categories returns 200")
+        print(f"   Found {len(cat_data)} equipment categories")
+    else:
+        result.record_fail("Smoke: GET /api/equipment-categories", cat_data)
+    
+    # GET /api/equipment-sorting-systems
+    success, sys_data = make_request("GET", "/equipment-sorting-systems")
+    if success:
+        result.record_pass("Smoke: GET /api/equipment-sorting-systems returns 200")
+        print(f"   Found {len(sys_data)} equipment sorting systems")
+    else:
+        result.record_fail("Smoke: GET /api/equipment-sorting-systems", sys_data)
+
+
 def main():
     print("\n" + "="*80)
-    print("LUXE INVENTORY - ITERATION 13 BACKEND TESTING")
+    print("LUXE INVENTORY - ITERATION 15 BACKEND TESTING")
     print("="*80)
     print(f"Backend URL: {BASE_URL}")
     print("="*80)
     
     result = TestResult()
     
-    # Test Iteration 13: Map location linking + negative width/height
-    test_iteration_13_map_location_linking(result)
+    # Test Iteration 15: Move item endpoint
+    test_iteration_15_move_item(result)
+    
+    # Smoke test equipment endpoints
+    test_smoke_equipment_endpoints(result)
     
     # Print summary
     print("\n")
