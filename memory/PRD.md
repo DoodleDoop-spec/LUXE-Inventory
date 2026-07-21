@@ -30,6 +30,11 @@ A proprietary internal tracking system for costumes/accessories with location tr
 - Wording sweep to "costumes / accessories".
 - Drag & drop on Inventory.
 
+### Iteration 15 — Jul 2026 (this session)
+- **Drag-and-drop move in Locations**: Items in the "CONTAINED" panel are now draggable. Drop one onto a location in the tree — it re-assigns that item's location on the server AND auto-removes any old-map pin/shape that was referencing that item. Backend: `POST /api/locations/move-item {item_id, item_type, new_location, new_sub_location}`.
+- **Equipment settings tab**: New "Equipment" tab in Settings for managing equipment-specific Categories and Sorting Systems.
+- **Coat-hanger icon for Costumes nav**: New `HangerIcon` component (inline SVG hanger) replaces the box icon on the "Costumes" tab.
+
 ### Iteration 13 — Jul 2026 (this session, bug fixes)
 - **Line rotation full 360°**: The floorplan line shape can now be freely rotated in any direction. Fixes: (a) lines now render two draggable endpoint circles (small black dots at both ends) when selected — drag either end anywhere on the canvas; (b) the resize deltas no longer clamp negative values for lines (they do still clamp for rects/circles which need positive dimensions).
 - **Sublocation linking on maps**: Both photo pins and floorplan shapes gained a `location_id` field. The property panel now shows a "LINK TO SUBLOCATION" dropdown listing this location's direct children. Once linked, the shape/pin gets a small 🔗 marker and can be opened by (a) double-clicking the shape/pin on the canvas or (b) clicking "→ Open this sublocation's map" in the property panel. Backend `MapPin` and `MapShape` models updated accordingly.
