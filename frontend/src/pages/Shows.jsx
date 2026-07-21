@@ -60,11 +60,12 @@ export default function Shows() {
 
   const liveShowIds = useMemo(() => {
     const s = new Set();
+    for (const sh of shows) if (sh?.is_live) s.add(sh.id);
     for (const c of costumes) {
       if (c.in_use && c.current_show_id) s.add(c.current_show_id);
     }
     return s;
-  }, [costumes]);
+  }, [costumes, shows]);
 
   const openNew = () => {
     setForm({ name: "", year: "", notes: "", show_link: "", image_id: null });

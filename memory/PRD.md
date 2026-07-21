@@ -90,9 +90,21 @@ A proprietary internal tracking system for costumes/accessories with location tr
 - **Mobile polish** — hamburger nav on <md screens with a mobile drawer, responsive main content padding, collapsible search icon on all breakpoints.
 - **Deduplicated category dropdowns** — legacy duplicate-name categories no longer crash Radix Select.
 
+### Iteration 16 — Feb 2026 (this session)
+Bug fixes ahead of the big Auth/RBAC rollout:
+- **Edit Show dialog scaling** — DialogContent now caps at `max-h-[90vh]` with a scrollable body and sticky Cancel/Save footer, so the modal never overflows the viewport on any device.
+- **Show is_live linked to attached costumes** — added `is_live: bool` on the `Show` model + `ShowPayload`. When toggled ON via the Edit Show dialog, every costume attached to this show is auto-flagged `in_use=True, current_show_id=<this show>`. When toggled OFF, those same costumes are auto-released (`in_use=False`, `current_show_id=None`). `GET /shows` and `PUT /shows/{id}` handle backfill so pre-existing shows just show `is_live=False`.
+- **Map detach on move/edit/delete** — new backend helper `_detach_item_from_all_maps(item_id)` runs a `$pull` across every location's `map_pins` and `floorplan_shapes` whenever a costume/equipment item's `location`/`sub_location` changes (via move-item, PUT, or DELETE). No more ghost pins/shapes on old maps.
+- **Auto-fill shape/pin label with sublocation name** — in both `FloorplanEditor` and `PhotoPinEditor`, selecting a sublocation from the "LINK TO SUBLOCATION" dropdown auto-fills the shape/pin label with the sublocation's name (only if the user hasn't set a custom label yet — defaults "Rack", "Room label", "Pin N" are treated as auto).
+
 ## Backlog
 
-### P0 — none pending
+### P0 — Round 2 (next iteration)
+- **Auth**: Emergent-managed Google Auth + email/password fallback (per user choice).
+- **Organizations**: on first login user picks "Create new Org" or "Join with invite code"; existing data assigned to a Default Org; first Google login = Director of Default Org.
+- **RBAC**: roles Director / Assistant Director / Tech Director / Costumes Manager / Student (Captain, Company Mgr) / Parent Volunteer (Costuming, Stage Mgmt), with sensible per-role defaults + Director-customisable permission matrix in Settings.
+- **Students tab**: new top-level tab (visible to Director/AD/Costumes Mgr/Costuming Parent) for students with picture, sizing info, notes, optional email. Overview at top with all necessary sizes. Optional email triggers a sign-up-invite email; existing users can sign in via same flow.
+
 ### P1
 - **Image editing** (crop / rotate) inside upload flow.
 - **Batch actions** on inventory list (bulk assign, bulk flag, bulk in-use).
@@ -100,15 +112,15 @@ A proprietary internal tracking system for costumes/accessories with location tr
 - **Persistent filters** (URL sync) on Inventory.
 
 ### P2
-- Backend router split (`server.py` ~1500 lines).
+- Backend router split (`server.py` now ~2350 lines).
 - Hex validation on category color.
 - Debounce `/categories/similar` on server side.
 - Aggregation-pipeline delete for flag category cascade.
 
 ## Test status
-- Iteration 9 backend: 35/35 pytest tests passing (8 new for this iteration, on top of iter-8's 27).
-- Iteration 9 frontend: all key testids verified live via Playwright at desktop and mobile viewports.
+- Iteration 16 backend: is_live ON/OFF toggle verified via curl (attached costumes updated as expected). Map detach verified via curl (pins & shapes with `item_id=<costume>` removed after `/locations/move-item`). Existing tests continue to pass.
+- Iteration 16 frontend: Edit Show dialog scaling verified via Playwright screenshot at 1440×900.
 - No known blocking issues.
 
 ## Test credentials
-None required (no auth).
+None required yet (no auth). Will be added in Iteration 17 when Auth ships.

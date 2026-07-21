@@ -292,6 +292,7 @@ class Show(BaseModel):
     image_id: Optional[str] = None
     notes: Optional[str] = ""
     show_link: Optional[str] = ""
+    is_live: bool = False
     created_at: str
 
 
@@ -301,6 +302,7 @@ class ShowPayload(BaseModel):
     image_id: Optional[str] = None
     notes: Optional[str] = ""
     show_link: Optional[str] = ""
+    is_live: Optional[bool] = None
 
 
 class SubcategoryPayload(BaseModel):
@@ -729,6 +731,13 @@ async def update_costume(costume_id: str, payload: CostumeUpdate):
         updates["note_image_ids"] = [str(x) for x in (updates["note_image_ids"] or []) if x]
     updates["updated_at"] = _now_iso()
     await db.costumes.update_one({"id": costume_id}, {"$set": updates})
+    # If the location/sub-location changed, detach this costume from any map pins/shapes
+    old_loc = existing.get("location") or ""
+    old_sub = existing.get("sub_location") or ""
+    new_loc = updates.get("location", old_loc)
+    new_sub = updates.get("sub_location", old_sub)
+    if ("location" in updates and new_loc != old_loc) or ("sub_location" in updates and new_sub != old_sub):
+        await _detach_item_from_all_maps(costume_id)
     doc = await db.costumes.find_one({"id": costume_id}, {"_id": 0})
     return doc
 
@@ -769,6 +778,7 @@ async def delete_costume(costume_id: str):
     res = await db.costumes.delete_one({"id": costume_id})
     if res.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Costume not found")
+    await _detach_item_from_all_maps(costume_id)
     return {"ok": True}
 
 
@@ -1309,6 +1319,8 @@ async def list_inventory():
 @api_router.get("/shows", response_model=List[Show])
 async def list_shows():
     docs = await db.shows.find({}, {"_id": 0}).to_list(1000)
+    for d in docs:
+        d.setdefault("is_live", False)
     docs.sort(key=lambda d: (d.get("year") is None, d.get("year") or 0, (d.get("name") or "").lower()))
     return docs
 
@@ -1329,6 +1341,7 @@ async def create_show(payload: ShowPayload):
         "image_id": payload.image_id,
         "notes": (payload.notes or "").strip(),
         "show_link": (payload.show_link or "").strip(),
+        "is_live": bool(payload.is_live) if payload.is_live is not None else False,
         "created_at": _now_iso(),
     }
     await db.shows.insert_one(doc)
@@ -1355,6 +1368,9 @@ async def update_show(show_id: str, payload: ShowPayload):
         "notes": (payload.notes or "").strip(),
         "show_link": (payload.show_link or "").strip(),
     }
+    was_live = bool(doc.get("is_live", False))
+    if payload.is_live is not None:
+        updates["is_live"] = bool(payload.is_live)
     await db.shows.update_one({"id": show_id}, {"$set": updates})
     # Recompute origin_year for any costume that references this show
     if year is not None:
@@ -1362,7 +1378,23 @@ async def update_show(show_id: str, payload: ShowPayload):
         for c in affected:
             ny = await _resolve_origin_year_from_shows(c.get("shows") or [])
             await db.costumes.update_one({"id": c["id"]}, {"$set": {"origin_year": ny, "updated_at": _now_iso()}})
+    # Live-toggle side effects: propagate to attached costumes
+    if payload.is_live is not None and bool(payload.is_live) != was_live:
+        now = _now_iso()
+        if bool(payload.is_live):
+            # Turning ON: mark all costumes attached to this show as in-use with current_show_id
+            await db.costumes.update_many(
+                {"shows.show_id": show_id},
+                {"$set": {"in_use": True, "in_use_since": now, "current_show_id": show_id, "updated_at": now}}
+            )
+        else:
+            # Turning OFF: clear current_show_id + in_use flag ONLY for costumes currently tagged to this show
+            await db.costumes.update_many(
+                {"current_show_id": show_id},
+                {"$set": {"in_use": False, "in_use_since": None, "current_show_id": None, "in_use_note": "", "updated_at": now}}
+            )
     updated = await db.shows.find_one({"id": show_id}, {"_id": 0})
+    updated.setdefault("is_live", False)
     return updated
 
 
@@ -2039,6 +2071,12 @@ async def update_equipment(equipment_id: str, payload: EquipmentUpdate):
         updates["note_image_ids"] = [str(x) for x in (updates["note_image_ids"] or []) if x]
     updates["updated_at"] = _now_iso()
     await db.equipment.update_one({"id": equipment_id}, {"$set": updates})
+    old_loc = existing.get("location") or ""
+    old_sub = existing.get("sub_location") or ""
+    new_loc = updates.get("location", old_loc)
+    new_sub = updates.get("sub_location", old_sub)
+    if ("location" in updates and new_loc != old_loc) or ("sub_location" in updates and new_sub != old_sub):
+        await _detach_item_from_all_maps(equipment_id)
     return await db.equipment.find_one({"id": equipment_id}, {"_id": 0})
 
 
@@ -2048,6 +2086,7 @@ async def delete_equipment(equipment_id: str):
     if not doc:
         raise HTTPException(status_code=404, detail="Equipment not found")
     await db.equipment.delete_one({"id": equipment_id})
+    await _detach_item_from_all_maps(equipment_id)
     return {"ok": True}
 
 
@@ -2100,6 +2139,24 @@ class MoveItemPayload(BaseModel):
     new_sub_location: Optional[str] = ""
 
 
+async def _detach_item_from_all_maps(item_id: str) -> None:
+    """Remove any map pins / floorplan shapes across ALL locations that reference this item.
+
+    This keeps location maps in sync when an item is moved or its location changes,
+    preventing ghost pins/shapes from showing up in a place where the item no longer lives.
+    """
+    if not item_id:
+        return
+    await db.locations.update_many(
+        {"map_pins.item_id": item_id},
+        {"$pull": {"map_pins": {"item_id": item_id}}},
+    )
+    await db.locations.update_many(
+        {"floorplan_shapes.item_id": item_id},
+        {"$pull": {"floorplan_shapes": {"item_id": item_id}}},
+    )
+
+
 @api_router.post("/locations/move-item")
 async def move_item_to_location(payload: MoveItemPayload):
     if payload.item_type not in ("costume", "equipment"):
@@ -2115,16 +2172,8 @@ async def move_item_to_location(payload: MoveItemPayload):
         "updated_at": _now_iso(),
     }
     await coll.update_one({"id": payload.item_id}, {"$set": updates})
-    # Clean up any map pins/shapes referencing this item on the OLD location's map
-    if old_location and old_location != payload.new_location:
-        old_loc = await db.locations.find_one({"name": old_location})
-        if old_loc:
-            pins = [p for p in (old_loc.get("map_pins") or []) if p.get("item_id") != payload.item_id]
-            shapes = [s for s in (old_loc.get("floorplan_shapes") or []) if s.get("item_id") != payload.item_id]
-            await db.locations.update_one(
-                {"id": old_loc["id"]},
-                {"$set": {"map_pins": pins, "floorplan_shapes": shapes}}
-            )
+    # Detach this item from every location map (pins + shapes) it may be attached to
+    await _detach_item_from_all_maps(payload.item_id)
     return {"ok": True, "old_location": old_location, "new_location": payload.new_location}
 
 

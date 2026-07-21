@@ -24,7 +24,7 @@ export default function ShowDetail() {
   const [pickerSelected, setPickerSelected] = useState({});
   const [pickerSaving, setPickerSaving] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const [editForm, setEditForm] = useState({ name: "", year: "", notes: "", show_link: "", image_id: null });
+  const [editForm, setEditForm] = useState({ name: "", year: "", notes: "", show_link: "", image_id: null, is_live: false });
   const [editSaving, setEditSaving] = useState(false);
   const [editUploading, setEditUploading] = useState(false);
 
@@ -139,6 +139,7 @@ export default function ShowDetail() {
       notes: show.notes || "",
       show_link: show.show_link || "",
       image_id: show.image_id || null,
+      is_live: !!show.is_live,
     });
     setEditOpen(true);
   };
@@ -177,6 +178,7 @@ export default function ShowDetail() {
         notes: editForm.notes.trim(),
         show_link: editForm.show_link.trim(),
         image_id: editForm.image_id,
+        is_live: !!editForm.is_live,
       });
       toast.success("Show updated");
       setEditOpen(false);
@@ -226,7 +228,14 @@ export default function ShowDetail() {
           </div>
         </div>
         <div className="md:col-span-7">
-          <div className="eyebrow">SHOW</div>
+          <div className="eyebrow flex items-center gap-2">
+            SHOW
+            {show.is_live && (
+              <span className="inline-flex items-center gap-1 bg-[#10B981] text-white px-2 py-0.5 text-[10px] font-mono-label tracking-widest normal-case" data-testid="show-live-badge">
+                <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse" /> LIVE
+              </span>
+            )}
+          </div>
           <h1 className="font-display text-4xl sm:text-5xl xl:text-6xl tracking-tight font-bold text-[#09090B] leading-[1.05] mt-2" data-testid="show-name">
             {show.name}
           </h1>
@@ -415,15 +424,19 @@ export default function ShowDetail() {
 
       {/* Edit show dialog */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="max-w-lg rounded-none border-[#09090B]" data-testid="show-edit-dialog">
-          <DialogHeader>
+        <DialogContent
+          className="max-w-lg w-[calc(100vw-2rem)] max-h-[90vh] rounded-none border-[#09090B] p-0 flex flex-col overflow-hidden"
+          data-testid="show-edit-dialog"
+        >
+          <DialogHeader className="px-6 pt-6 pb-2 shrink-0">
             <div className="eyebrow">EDIT / SHOW</div>
             <DialogTitle className="font-display text-2xl tracking-tight">Edit show</DialogTitle>
             <DialogDescription className="text-[#71717A]">
               Update this show&apos;s details. Timestamps stay on each costume, not on the show.
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={submitEdit} className="space-y-4 mt-2">
+          <form onSubmit={submitEdit} className="flex flex-col flex-1 min-h-0">
+            <div className="flex-1 overflow-y-auto px-6 py-2 space-y-4">
             <div className="space-y-2">
               <Label className="eyebrow">NAME</Label>
               <Input
@@ -468,6 +481,31 @@ export default function ShowDetail() {
                 className="rounded-none border-[#E4E4E7]"
               />
             </div>
+            <div className="border border-[#E4E4E7] p-3 flex items-start gap-3 bg-[#FAFAFA]">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={editForm.is_live}
+                data-testid="show-edit-live"
+                onClick={() => setEditForm({ ...editForm, is_live: !editForm.is_live })}
+                className={`shrink-0 mt-0.5 relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${editForm.is_live ? "bg-[#10B981]" : "bg-[#D4D4D8]"}`}
+              >
+                <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${editForm.is_live ? "translate-x-5" : "translate-x-0.5"}`} />
+              </button>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium text-[#09090B] flex items-center gap-2">
+                  Show is Live
+                  {editForm.is_live && (
+                    <span className="inline-flex items-center gap-1 bg-[#10B981] text-white px-1.5 py-0.5 text-[9px] font-mono-label tracking-widest">
+                      <span className="w-1 h-1 bg-white rounded-full animate-pulse" /> LIVE
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-[#71717A] mt-0.5">
+                  When ON, every costume attached to this show is auto-tagged as in-use for this show. Turn OFF to release them.
+                </p>
+              </div>
+            </div>
             <div className="space-y-2">
               <Label className="eyebrow">COVER PHOTO</Label>
               <div className="flex items-start gap-3">
@@ -499,7 +537,8 @@ export default function ShowDetail() {
                 </div>
               </div>
             </div>
-            <DialogFooter className="gap-2">
+            </div>
+            <DialogFooter className="gap-2 px-6 py-4 border-t border-[#E4E4E7] bg-white shrink-0">
               <Button type="button" variant="outline" onClick={() => setEditOpen(false)} className="rounded-none h-11">Cancel</Button>
               <Button type="submit" disabled={editSaving} data-testid="show-edit-save" className="bg-[#09090B] hover:bg-[#27272A] text-white rounded-none h-11 px-6">
                 {editSaving ? "Saving…" : "Save changes"}

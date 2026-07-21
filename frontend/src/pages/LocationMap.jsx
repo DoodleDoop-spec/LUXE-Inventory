@@ -356,7 +356,17 @@ function PhotoPinEditor({ imageId, setImageId, pins, setPins, onUpload, uploadin
                       <select
                         data-testid={`pin-location-${p.id}`}
                         value={p.location_id || ""}
-                        onChange={(e) => updatePin(p.id, { location_id: e.target.value || null })}
+                        onChange={(e) => {
+                          const newId = e.target.value || null;
+                          const patch = { location_id: newId };
+                          if (newId) {
+                            const cl = childLocations.find((l) => l.id === newId);
+                            const currentLabel = (p.label || "").trim();
+                            const isDefault = !currentLabel || /^Pin \d+$/.test(currentLabel);
+                            if (cl && isDefault) patch.label = cl.name;
+                          }
+                          updatePin(p.id, patch);
+                        }}
                         className="w-full border border-[#E4E4E7] h-7 text-xs px-1 rounded-none bg-white"
                       >
                         <option value="">— none —</option>
@@ -678,7 +688,19 @@ function FloorplanEditor({ shapes, setShapes, tool, setTool, childLocations = []
                   <select
                     data-testid="floorplan-selected-location"
                     value={selected.location_id || ""}
-                    onChange={(e) => updateSelected({ location_id: e.target.value || null })}
+                    onChange={(e) => {
+                      const newId = e.target.value || null;
+                      const patch = { location_id: newId };
+                      if (newId) {
+                        // Auto-fill the shape's label with the sublocation name
+                        // when the user hasn't set a custom label yet.
+                        const cl = childLocations.find((l) => l.id === newId);
+                        const currentLabel = (selected.label || "").trim();
+                        const isDefault = !currentLabel || currentLabel === "Rack" || currentLabel === "Room label" || /^Pin \d+$/.test(currentLabel);
+                        if (cl && isDefault) patch.label = cl.name;
+                      }
+                      updateSelected(patch);
+                    }}
                     className="w-full border border-[#E4E4E7] h-8 text-xs px-1 rounded-none bg-white"
                   >
                     <option value="">— none —</option>
