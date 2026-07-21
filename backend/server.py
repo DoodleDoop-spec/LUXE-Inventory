@@ -1,15 +1,17 @@
-from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, Query, Response
+from fastapi import FastAPI, APIRouter, UploadFile, File, HTTPException, Query, Response, Request, Cookie, Depends
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 import uuid
+import secrets
 import requests
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional, Dict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from passlib.context import CryptContext
 
 
 ROOT_DIR = Path(__file__).parent
@@ -2217,8 +2219,1318 @@ async def get_location(location_id: str):
     return doc
 
 
+# ==================== STUDENTS ====================
+# Roster of performers (usually students) so directors, ADs, costumes managers
+# and costuming parents can keep their sizing / measurements / notes in one place.
+# Later, an optional email invite kicks off an authentication sign-up flow.
+
+DEFAULT_MEASUREMENT_KEYS = [
+    "Height",
+    "Chest / Bust",
+    "Waist",
+    "Hips",
+    "Inseam",
+    "Sleeve",
+    "Neck",
+    "Shoulders",
+]
+
+DEFAULT_SIZE_KEYS = [
+    "Shirt",
+    "Pants",
+    "Dress",
+    "Shoe",
+    "Hat",
+    "Glove",
+]
+
+
+class Student(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    first_name: str
+    last_name: Optional[str] = ""
+    display_name: Optional[str] = ""
+    image_id: Optional[str] = None
+    email: Optional[str] = ""
+    phone: Optional[str] = ""
+    grade: Optional[str] = ""
+    pronouns: Optional[str] = ""
+    notes: Optional[str] = ""
+    measurements: Dict[str, str] = {}
+    sizes: Dict[str, str] = {}
+    invited: bool = False
+    invited_at: Optional[str] = None
+    user_id: Optional[str] = None  # populated when the invited student signs up
+    created_at: str
+    updated_at: Optional[str] = None
+
+
+class StudentPayload(BaseModel):
+    first_name: str
+    last_name: Optional[str] = ""
+    display_name: Optional[str] = ""
+    image_id: Optional[str] = None
+    email: Optional[str] = ""
+    phone: Optional[str] = ""
+    grade: Optional[str] = ""
+    pronouns: Optional[str] = ""
+    notes: Optional[str] = ""
+    measurements: Optional[Dict[str, str]] = None
+    sizes: Optional[Dict[str, str]] = None
+
+
+class StudentUpdate(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    display_name: Optional[str] = None
+    image_id: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    grade: Optional[str] = None
+    pronouns: Optional[str] = None
+    notes: Optional[str] = None
+    measurements: Optional[Dict[str, str]] = None
+    sizes: Optional[Dict[str, str]] = None
+
+
+def _clean_dict_str(d: Optional[Dict[str, str]]) -> Dict[str, str]:
+    if not d:
+        return {}
+    out: Dict[str, str] = {}
+    for k, v in d.items():
+        key = str(k or "").strip()
+        val = str(v or "").strip()
+        if key:
+            out[key] = val
+    return out
+
+
+def _student_full_name(doc: dict) -> str:
+    parts = [doc.get("first_name") or "", doc.get("last_name") or ""]
+    return " ".join(p for p in parts if p).strip()
+
+
+@api_router.get("/students/config")
+async def students_config():
+    """Default measurement + size keys used by the client to render forms.
+
+    In a later iteration these can be overridden per-org via Settings.
+    """
+    return {
+        "measurement_keys": DEFAULT_MEASUREMENT_KEYS,
+        "size_keys": DEFAULT_SIZE_KEYS,
+    }
+
+
+@api_router.get("/students", response_model=List[Student])
+async def list_students(q: Optional[str] = None):
+    query: Dict[str, object] = {}
+    docs = await db.students.find(query, {"_id": 0}).to_list(5000)
+    if q:
+        needle = q.strip().lower()
+        docs = [
+            d for d in docs
+            if needle in (d.get("first_name") or "").lower()
+            or needle in (d.get("last_name") or "").lower()
+            or needle in (d.get("display_name") or "").lower()
+            or needle in (d.get("email") or "").lower()
+        ]
+    docs.sort(key=lambda d: ((d.get("last_name") or "").lower(), (d.get("first_name") or "").lower()))
+    for d in docs:
+        d.setdefault("measurements", {})
+        d.setdefault("sizes", {})
+        d.setdefault("invited", False)
+    return docs
+
+
+@api_router.get("/students/stats")
+async def students_stats():
+    docs = await db.students.find({}, {"_id": 0}).to_list(5000)
+    total = len(docs)
+    invited = sum(1 for d in docs if d.get("invited"))
+    with_email = sum(1 for d in docs if (d.get("email") or "").strip())
+    # Distribution of common size keys
+    size_dist: Dict[str, Dict[str, int]] = {}
+    for d in docs:
+        for k, v in (d.get("sizes") or {}).items():
+            v = (v or "").strip()
+            if not v:
+                continue
+            size_dist.setdefault(k, {})
+            size_dist[k][v] = size_dist[k].get(v, 0) + 1
+    return {
+        "total": total,
+        "invited": invited,
+        "with_email": with_email,
+        "size_distribution": size_dist,
+    }
+
+
+@api_router.get("/students/{student_id}", response_model=Student)
+async def get_student(student_id: str):
+    doc = await db.students.find_one({"id": student_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Student not found")
+    doc.setdefault("measurements", {})
+    doc.setdefault("sizes", {})
+    doc.setdefault("invited", False)
+    return doc
+
+
+@api_router.post("/students", response_model=Student)
+async def create_student(payload: StudentPayload):
+    first = (payload.first_name or "").strip()
+    if not first:
+        raise HTTPException(status_code=400, detail="First name required")
+    now = _now_iso()
+    doc = {
+        "id": str(uuid.uuid4()),
+        "first_name": first,
+        "last_name": (payload.last_name or "").strip(),
+        "display_name": (payload.display_name or "").strip(),
+        "image_id": payload.image_id or None,
+        "email": (payload.email or "").strip().lower(),
+        "phone": (payload.phone or "").strip(),
+        "grade": (payload.grade or "").strip(),
+        "pronouns": (payload.pronouns or "").strip(),
+        "notes": (payload.notes or "").strip(),
+        "measurements": _clean_dict_str(payload.measurements),
+        "sizes": _clean_dict_str(payload.sizes),
+        "invited": False,
+        "invited_at": None,
+        "user_id": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.students.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.put("/students/{student_id}", response_model=Student)
+async def update_student(student_id: str, payload: StudentUpdate):
+    existing = await db.students.find_one({"id": student_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Student not found")
+    updates = {k: v for k, v in payload.model_dump(exclude_none=True).items()}
+    for key in ("first_name", "last_name", "display_name", "email", "phone", "grade", "pronouns", "notes"):
+        if key in updates:
+            val = str(updates[key] or "").strip()
+            if key == "email":
+                val = val.lower()
+            updates[key] = val
+    if "first_name" in updates and not updates["first_name"]:
+        raise HTTPException(status_code=400, detail="First name required")
+    if "measurements" in updates:
+        updates["measurements"] = _clean_dict_str(updates["measurements"])
+    if "sizes" in updates:
+        updates["sizes"] = _clean_dict_str(updates["sizes"])
+    updates["updated_at"] = _now_iso()
+    await db.students.update_one({"id": student_id}, {"$set": updates})
+    return await db.students.find_one({"id": student_id}, {"_id": 0})
+
+
+@api_router.delete("/students/{student_id}")
+async def delete_student(student_id: str):
+    res = await db.students.delete_one({"id": student_id})
+    if res.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Student not found")
+    return {"ok": True}
+
+
+@api_router.post("/students/{student_id}/invite")
+async def invite_student(student_id: str):
+    """Mark a student as invited to sign up.
+
+    NOTE: Actual email delivery ships with the Auth iteration. For now this only
+    stamps the record so the UI can render "Invited" state and re-send later.
+    """
+    doc = await db.students.find_one({"id": student_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Student not found")
+    email = (doc.get("email") or "").strip()
+    if not email:
+        raise HTTPException(status_code=400, detail="Student has no email on file")
+    await db.students.update_one(
+        {"id": student_id},
+        {"$set": {"invited": True, "invited_at": _now_iso(), "updated_at": _now_iso()}},
+    )
+    return {"ok": True, "email": email, "queued": True, "sent": False,
+            "message": "Invite queued. Email delivery will activate when authentication is enabled."}
+
+
+# ==================== ROLES & PERMISSIONS ====================
+# Simple in-org RBAC. Every role is a document with a flat map of permission keys.
+# A Director-only Settings UI edits the matrix. Once auth ships, incoming requests
+# will be checked against the caller's role -> permissions map.
+
+PERMISSION_CATALOG: Dict[str, List[Dict[str, str]]] = {
+    "Costumes": [
+        {"key": "costumes.view", "label": "View costumes"},
+        {"key": "costumes.create", "label": "Create costumes"},
+        {"key": "costumes.edit", "label": "Edit costumes"},
+        {"key": "costumes.delete", "label": "Delete costumes"},
+        {"key": "costumes.flag", "label": "Flag / unflag costumes"},
+        {"key": "costumes.pin", "label": "Pin to dashboard"},
+    ],
+    "Equipment": [
+        {"key": "equipment.view", "label": "View equipment"},
+        {"key": "equipment.create", "label": "Create equipment"},
+        {"key": "equipment.edit", "label": "Edit equipment"},
+        {"key": "equipment.delete", "label": "Delete equipment"},
+    ],
+    "Shows": [
+        {"key": "shows.view", "label": "View shows"},
+        {"key": "shows.create", "label": "Create shows"},
+        {"key": "shows.edit", "label": "Edit shows"},
+        {"key": "shows.delete", "label": "Delete shows"},
+        {"key": "shows.toggle_live", "label": "Toggle Live status"},
+    ],
+    "Storage & Maps": [
+        {"key": "locations.view", "label": "View storage"},
+        {"key": "locations.create", "label": "Create locations"},
+        {"key": "locations.edit", "label": "Edit locations"},
+        {"key": "locations.delete", "label": "Delete locations"},
+        {"key": "maps.edit", "label": "Edit location maps"},
+        {"key": "items.drag_drop", "label": "Drag-drop reassign items"},
+    ],
+    "Flags": [
+        {"key": "flags.view", "label": "View flag types"},
+        {"key": "flags.edit", "label": "Manage flag categories"},
+    ],
+    "Students": [
+        {"key": "students.view", "label": "View student roster"},
+        {"key": "students.create", "label": "Add students"},
+        {"key": "students.edit", "label": "Edit student measurements/notes"},
+        {"key": "students.delete", "label": "Delete students"},
+        {"key": "students.invite", "label": "Send sign-up invites"},
+    ],
+    "Organisation": [
+        {"key": "settings.edit", "label": "Edit org settings & branding"},
+        {"key": "taxonomy.edit", "label": "Manage categories / sizing systems"},
+        {"key": "users.invite", "label": "Invite users"},
+        {"key": "users.manage_roles", "label": "Assign / edit user roles"},
+        {"key": "users.remove", "label": "Remove users from org"},
+        {"key": "roles.edit", "label": "Edit role permissions"},
+    ],
+}
+
+
+def _all_permission_keys() -> List[str]:
+    keys: List[str] = []
+    for group in PERMISSION_CATALOG.values():
+        for p in group:
+            keys.append(p["key"])
+    return keys
+
+
+def _perms_from_keys(keys: List[str], value: bool = True) -> Dict[str, bool]:
+    return {k: value for k in keys}
+
+
+def _default_role_presets() -> List[Dict]:
+    all_keys = _all_permission_keys()
+
+    def keys_startswith(prefixes: List[str]) -> List[str]:
+        return [k for k in all_keys if any(k.startswith(p) for p in prefixes)]
+
+    view_only = [k for k in all_keys if k.endswith(".view")]
+    now = _now_iso()
+
+    presets = [
+        {
+            "name": "Director",
+            "slug": "director",
+            "description": "Full control. Can manage users, roles, org settings, and everything else.",
+            "color": "#DC2626",
+            "permissions": _perms_from_keys(all_keys, True),
+            "is_system": True,
+        },
+        {
+            "name": "Assistant Director",
+            "slug": "assistant_director",
+            "description": "Nearly full control. Cannot remove users or edit roles.",
+            "color": "#EA580C",
+            "permissions": {
+                **_perms_from_keys(all_keys, True),
+                "users.remove": False,
+                "users.manage_roles": False,
+                "roles.edit": False,
+            },
+            "is_system": True,
+        },
+        {
+            "name": "Tech Director",
+            "slug": "tech_director",
+            "description": "Runs equipment, maps and storage. Views everything else.",
+            "color": "#2563EB",
+            "permissions": {
+                **_perms_from_keys(view_only, True),
+                **_perms_from_keys(keys_startswith(["equipment.", "locations.", "maps.", "items."]), True),
+                "shows.toggle_live": True,
+            },
+            "is_system": True,
+        },
+        {
+            "name": "Costumes Manager",
+            "slug": "costumes_manager",
+            "description": "Owns costumes, flags and student measurements. Can toggle Live.",
+            "color": "#7C3AED",
+            "permissions": {
+                **_perms_from_keys(view_only, True),
+                **_perms_from_keys(keys_startswith(["costumes.", "flags.", "students.", "items."]), True),
+                "shows.edit": True,
+                "shows.toggle_live": True,
+                "taxonomy.edit": True,
+            },
+            "is_system": True,
+        },
+        {
+            "name": "Student",
+            "slug": "student",
+            "description": "Views costumes and shows. No edits.",
+            "color": "#0891B2",
+            "permissions": {
+                **_perms_from_keys(["costumes.view", "shows.view"], True),
+            },
+            "is_system": True,
+        },
+        {
+            "name": "Student · Captain",
+            "slug": "student_captain",
+            "description": "Student plus roster visibility.",
+            "color": "#0EA5E9",
+            "permissions": {
+                **_perms_from_keys(["costumes.view", "shows.view", "students.view", "equipment.view"], True),
+            },
+            "is_system": True,
+        },
+        {
+            "name": "Student · Company Manager",
+            "slug": "student_company_manager",
+            "description": "Student plus can add shows and manage the show list.",
+            "color": "#22C55E",
+            "permissions": {
+                **_perms_from_keys(["costumes.view", "shows.view", "shows.create", "shows.edit", "students.view", "equipment.view"], True),
+            },
+            "is_system": True,
+        },
+        {
+            "name": "Parent Volunteer",
+            "slug": "parent_volunteer",
+            "description": "Baseline volunteer access. View everything.",
+            "color": "#78716C",
+            "permissions": {
+                **_perms_from_keys(view_only, True),
+            },
+            "is_system": True,
+        },
+        {
+            "name": "Parent Volunteer · Costuming",
+            "slug": "parent_costuming",
+            "description": "Helps with costumes, flags and student measurements.",
+            "color": "#DB2777",
+            "permissions": {
+                **_perms_from_keys(view_only, True),
+                **_perms_from_keys(["costumes.edit", "costumes.flag", "flags.view", "students.edit", "items.drag_drop"], True),
+            },
+            "is_system": True,
+        },
+        {
+            "name": "Parent Volunteer · Stage Management",
+            "slug": "parent_stage_mgmt",
+            "description": "Helps with shows, equipment and maps.",
+            "color": "#0D9488",
+            "permissions": {
+                **_perms_from_keys(view_only, True),
+                **_perms_from_keys(["equipment.edit", "shows.edit", "shows.toggle_live", "maps.edit", "items.drag_drop"], True),
+            },
+            "is_system": True,
+        },
+    ]
+    # Backfill any missing keys with False so the matrix always renders
+    for p in presets:
+        for k in all_keys:
+            p["permissions"].setdefault(k, False)
+        p.update({"id": str(uuid.uuid4()), "created_at": now, "updated_at": now})
+    return presets
+
+
+async def _seed_roles_if_empty() -> None:
+    count = await db.roles.count_documents({})
+    if count > 0:
+        return
+    presets = _default_role_presets()
+    await db.roles.insert_many(presets)
+
+
+class Role(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    name: str
+    slug: str
+    description: Optional[str] = ""
+    color: Optional[str] = "#71717A"
+    permissions: Dict[str, bool] = {}
+    is_system: bool = False
+    created_at: str
+    updated_at: Optional[str] = None
+
+
+class RoleCreate(BaseModel):
+    name: str
+    description: Optional[str] = ""
+    color: Optional[str] = "#71717A"
+    permissions: Optional[Dict[str, bool]] = None
+    clone_from: Optional[str] = None  # role id to clone permissions from
+
+
+class RoleUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    color: Optional[str] = None
+    permissions: Optional[Dict[str, bool]] = None
+
+
+def _slugify(name: str) -> str:
+    return "".join(c.lower() if c.isalnum() else "_" for c in name.strip()).strip("_") or f"role_{uuid.uuid4().hex[:6]}"
+
+
+@api_router.get("/permissions/catalog")
+async def permissions_catalog():
+    return {"catalog": PERMISSION_CATALOG, "all_keys": _all_permission_keys()}
+
+
+@api_router.get("/roles", response_model=List[Role])
+async def list_roles(request: Request):
+    await _seed_roles_if_empty()
+    # Resolve user by session token (middleware already validated it).
+    user_id = getattr(request.state, "session_user_id", None)
+    org_id = None
+    if user_id:
+        u = await db.users.find_one({"user_id": user_id}, {"_id": 0, "org_id": 1})
+        if u:
+            org_id = u.get("org_id")
+    # If the user has an org, scope to their org's roles. Otherwise return
+    # unowned (global) roles so onboarding UIs can preview role names.
+    if org_id:
+        docs = await db.roles.find({"org_id": org_id}, {"_id": 0}).to_list(500)
+        if not docs:
+            docs = await db.roles.find({"$or": [{"org_id": {"$exists": False}}, {"org_id": None}]}, {"_id": 0}).to_list(500)
+    else:
+        docs = await db.roles.find({"$or": [{"org_id": {"$exists": False}}, {"org_id": None}]}, {"_id": 0}).to_list(500)
+    # Ensure every role has an entry for every known permission key
+    all_keys = _all_permission_keys()
+    for d in docs:
+        perms = d.get("permissions") or {}
+        for k in all_keys:
+            perms.setdefault(k, False)
+        d["permissions"] = perms
+    docs.sort(key=lambda d: (not d.get("is_system", False), d.get("name", "").lower()))
+    return docs
+
+
+@api_router.post("/roles", response_model=Role)
+async def create_role(payload: RoleCreate):
+    name = (payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Role name required")
+    slug = _slugify(name)
+    dupe = await db.roles.find_one({"$or": [{"name": name}, {"slug": slug}]})
+    if dupe:
+        raise HTTPException(status_code=409, detail="A role with that name already exists")
+    all_keys = _all_permission_keys()
+    perms: Dict[str, bool] = {}
+    if payload.clone_from:
+        src = await db.roles.find_one({"id": payload.clone_from}, {"_id": 0})
+        if src:
+            perms = {k: bool(v) for k, v in (src.get("permissions") or {}).items()}
+    if payload.permissions:
+        perms.update({k: bool(v) for k, v in payload.permissions.items()})
+    for k in all_keys:
+        perms.setdefault(k, False)
+    now = _now_iso()
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "slug": slug,
+        "description": (payload.description or "").strip(),
+        "color": payload.color or "#71717A",
+        "permissions": perms,
+        "is_system": False,
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.roles.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.put("/roles/{role_id}", response_model=Role)
+async def update_role(role_id: str, payload: RoleUpdate):
+    doc = await db.roles.find_one({"id": role_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Role not found")
+    updates: Dict[str, object] = {}
+    if payload.name is not None and not doc.get("is_system"):
+        new_name = payload.name.strip()
+        if not new_name:
+            raise HTTPException(status_code=400, detail="Name cannot be empty")
+        # keep slug stable for system roles; for custom roles allow rename but ensure uniqueness
+        existing = await db.roles.find_one({"name": new_name, "id": {"$ne": role_id}})
+        if existing:
+            raise HTTPException(status_code=409, detail="Another role already uses that name")
+        updates["name"] = new_name
+    if payload.description is not None:
+        updates["description"] = payload.description.strip()
+    if payload.color is not None:
+        updates["color"] = payload.color
+    if payload.permissions is not None:
+        merged = dict(doc.get("permissions") or {})
+        merged.update({k: bool(v) for k, v in payload.permissions.items()})
+        # backfill unknown keys with False
+        for k in _all_permission_keys():
+            merged.setdefault(k, False)
+        updates["permissions"] = merged
+    updates["updated_at"] = _now_iso()
+    await db.roles.update_one({"id": role_id}, {"$set": updates})
+    return await db.roles.find_one({"id": role_id}, {"_id": 0})
+
+
+@api_router.delete("/roles/{role_id}")
+async def delete_role(role_id: str):
+    doc = await db.roles.find_one({"id": role_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Role not found")
+    if doc.get("is_system"):
+        raise HTTPException(status_code=400, detail="Built-in roles cannot be deleted (edit their permissions instead)")
+    await db.roles.delete_one({"id": role_id})
+    return {"ok": True}
+
+
+@api_router.post("/roles/reset-defaults")
+async def reset_default_roles():
+    """Wipe every role and reseed the built-in presets. Custom roles are lost."""
+    await db.roles.delete_many({})
+    await _seed_roles_if_empty()
+    return {"ok": True}
+
+
+# ==================== AUTHENTICATION ====================
+# Two flows share one `users` + `user_sessions` collection:
+#   1. Emergent-managed Google Auth (session_id → session_data → session_token).
+#   2. Email + password (register / login → session_token).
+# Both flows deposit a random 32-byte hex `session_token` in an httpOnly cookie.
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+SESSION_DAYS = 7
+SESSION_COOKIE_NAME = "session_token"
+EMERGENT_SESSION_ENDPOINT = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
+
+
+class AppUser(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    user_id: str
+    email: str
+    name: str
+    picture: Optional[str] = None
+    auth_provider: str  # "google" | "password" | "hybrid"
+    role_id: Optional[str] = None
+    role_slug: Optional[str] = None
+    org_id: Optional[str] = None
+    is_superadmin: bool = False
+    created_at: str
+    updated_at: Optional[str] = None
+
+
+class RegisterPayload(BaseModel):
+    email: str
+    password: str
+    name: Optional[str] = ""
+
+
+class LoginPayload(BaseModel):
+    email: str
+    password: str
+
+
+class GoogleSessionPayload(BaseModel):
+    session_id: str
+
+
+def _new_token() -> str:
+    return secrets.token_urlsafe(48)
+
+
+def _expiry() -> datetime:
+    return datetime.now(timezone.utc) + timedelta(days=SESSION_DAYS)
+
+
+def _cookie_kwargs():
+    return {
+        "httponly": True,
+        "secure": True,
+        "samesite": "none",
+        "path": "/",
+        "max_age": SESSION_DAYS * 24 * 3600,
+    }
+
+
+async def _director_role_id() -> Optional[str]:
+    await _seed_roles_if_empty()
+    role = await db.roles.find_one({"slug": "director"}, {"_id": 0})
+    return role["id"] if role else None
+
+
+async def _default_role_id() -> Optional[str]:
+    """Non-privileged default role for new signups after the first user."""
+    await _seed_roles_if_empty()
+    # Prefer Parent Volunteer as a safe view-only default
+    for slug in ("parent_volunteer", "student"):
+        role = await db.roles.find_one({"slug": slug}, {"_id": 0})
+        if role:
+            return role["id"]
+    return None
+
+
+async def _project_user(doc: dict) -> dict:
+    if not doc:
+        return doc
+    doc.pop("_id", None)
+    doc.pop("password_hash", None)
+    return doc
+
+
+async def _issue_session(user_id: str) -> str:
+    token = _new_token()
+    await db.user_sessions.insert_one({
+        "session_id": str(uuid.uuid4()),
+        "user_id": user_id,
+        "session_token": token,
+        "created_at": datetime.now(timezone.utc),
+        "expires_at": _expiry(),
+    })
+    return token
+
+
+async def _resolve_role(role_id: Optional[str]) -> Optional[dict]:
+    if not role_id:
+        return None
+    return await db.roles.find_one({"id": role_id}, {"_id": 0})
+
+
+async def _upsert_google_user(email: str, name: str, picture: Optional[str]) -> dict:
+    """Create or update a Google-linked user. First user gets Director role + super-admin."""
+    email = (email or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="Google returned no email")
+    now = _now_iso()
+    existing = await db.users.find_one({"email": email}, {"_id": 0})
+    if existing:
+        updates = {"name": name or existing.get("name") or "", "picture": picture, "updated_at": now}
+        # Upgrade auth_provider to hybrid if they also have a password
+        if existing.get("auth_provider") == "password" and existing.get("password_hash"):
+            updates["auth_provider"] = "hybrid"
+        elif existing.get("auth_provider") != "hybrid":
+            updates["auth_provider"] = "google" if not existing.get("password_hash") else "hybrid"
+        await db.users.update_one({"user_id": existing["user_id"]}, {"$set": updates})
+        return await db.users.find_one({"user_id": existing["user_id"]}, {"_id": 0})
+    # New user
+    user_count = await db.users.count_documents({})
+    role_id = await _director_role_id() if user_count == 0 else await _default_role_id()
+    role = await _resolve_role(role_id)
+    doc = {
+        "user_id": f"u_{uuid.uuid4().hex[:12]}",
+        "email": email,
+        "name": name or email.split("@")[0],
+        "picture": picture,
+        "auth_provider": "google",
+        "role_id": role_id,
+        "role_slug": role["slug"] if role else None,
+        "org_id": None,
+        "is_superadmin": user_count == 0,
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.users.insert_one(doc)
+    # First-ever user: bootstrap the Default Org and assign self to it
+    if user_count == 0:
+        org_id = await _bootstrap_default_org_if_needed(doc["user_id"])
+        await db.users.update_one({"user_id": doc["user_id"]}, {"$set": {"org_id": org_id}})
+    return await db.users.find_one({"user_id": doc["user_id"]}, {"_id": 0})
+
+
+async def get_current_user(
+    request: Request,
+    session_token: Optional[str] = Cookie(default=None),
+) -> dict:
+    """FastAPI dependency: resolve current user from cookie OR Authorization: Bearer <token>."""
+    token = session_token
+    if not token:
+        auth = request.headers.get("authorization") or request.headers.get("Authorization")
+        if auth and auth.lower().startswith("bearer "):
+            token = auth.split(" ", 1)[1].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    sess = await db.user_sessions.find_one({"session_token": token}, {"_id": 0})
+    if not sess:
+        raise HTTPException(status_code=401, detail="Invalid session")
+    expires_at = sess.get("expires_at")
+    if isinstance(expires_at, str):
+        try:
+            expires_at = datetime.fromisoformat(expires_at)
+        except Exception:
+            expires_at = None
+    if expires_at is not None:
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at < datetime.now(timezone.utc):
+            raise HTTPException(status_code=401, detail="Session expired")
+    user = await db.users.find_one({"user_id": sess["user_id"]}, {"_id": 0, "password_hash": 0})
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+
+@api_router.post("/auth/register")
+async def auth_register(payload: RegisterPayload, response: Response):
+    email = payload.email.lower().strip()
+    if not payload.password or len(payload.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+    existing = await db.users.find_one({"email": email}, {"_id": 0})
+    if existing and existing.get("password_hash"):
+        raise HTTPException(status_code=409, detail="An account with this email already exists")
+    now = _now_iso()
+    pwd_hash = pwd_context.hash(payload.password)
+    if existing:
+        # Google-linked account adding a password → hybrid
+        await db.users.update_one(
+            {"user_id": existing["user_id"]},
+            {"$set": {"password_hash": pwd_hash, "auth_provider": "hybrid", "updated_at": now,
+                       "name": payload.name.strip() if payload.name else existing.get("name", "")}}
+        )
+        user_id = existing["user_id"]
+    else:
+        user_count = await db.users.count_documents({})
+        role_id = await _director_role_id() if user_count == 0 else await _default_role_id()
+        role = await _resolve_role(role_id)
+        user_id = f"u_{uuid.uuid4().hex[:12]}"
+        await db.users.insert_one({
+            "user_id": user_id,
+            "email": email,
+            "name": (payload.name or email.split("@")[0]).strip(),
+            "picture": None,
+            "auth_provider": "password",
+            "password_hash": pwd_hash,
+            "role_id": role_id,
+            "role_slug": role["slug"] if role else None,
+            "org_id": None,
+            "is_superadmin": user_count == 0,
+            "created_at": now,
+            "updated_at": now,
+        })
+        # First user: create Default Org and assign self to it as Director
+        if user_count == 0:
+            org_id = await _bootstrap_default_org_if_needed(user_id)
+            await db.users.update_one({"user_id": user_id}, {"$set": {"org_id": org_id}})
+    token = await _issue_session(user_id)
+    response.set_cookie(SESSION_COOKIE_NAME, token, **_cookie_kwargs())
+    user = await db.users.find_one({"user_id": user_id}, {"_id": 0, "password_hash": 0})
+    return {"user": user, "session_token": token}
+
+
+@api_router.post("/auth/login")
+async def auth_login(payload: LoginPayload, response: Response):
+    email = payload.email.lower().strip()
+    user = await db.users.find_one({"email": email})
+    if not user or not user.get("password_hash"):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    if not pwd_context.verify(payload.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    token = await _issue_session(user["user_id"])
+    response.set_cookie(SESSION_COOKIE_NAME, token, **_cookie_kwargs())
+    user.pop("_id", None)
+    user.pop("password_hash", None)
+    return {"user": user, "session_token": token}
+
+
+@api_router.post("/auth/session")
+async def auth_google_session(payload: GoogleSessionPayload, response: Response):
+    """Exchange an Emergent OAuth `session_id` for our own session_token."""
+    if not payload.session_id:
+        raise HTTPException(status_code=400, detail="session_id required")
+    try:
+        # REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
+        r = requests.get(
+            EMERGENT_SESSION_ENDPOINT,
+            headers={"X-Session-ID": payload.session_id},
+            timeout=15,
+        )
+    except Exception as e:
+        logger.error(f"Emergent auth request failed: {e}")
+        raise HTTPException(status_code=502, detail="Auth service unreachable")
+    if r.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid Google session")
+    data = r.json() or {}
+    email = data.get("email")
+    name = data.get("name") or ""
+    picture = data.get("picture")
+    emergent_session_token = data.get("session_token")
+    if not email or not emergent_session_token:
+        raise HTTPException(status_code=401, detail="Malformed session data")
+    user = await _upsert_google_user(email, name, picture)
+    # Store the Emergent-provided session_token as ours (7-day expiry)
+    await db.user_sessions.insert_one({
+        "session_id": str(uuid.uuid4()),
+        "user_id": user["user_id"],
+        "session_token": emergent_session_token,
+        "created_at": datetime.now(timezone.utc),
+        "expires_at": _expiry(),
+    })
+    response.set_cookie(SESSION_COOKIE_NAME, emergent_session_token, **_cookie_kwargs())
+    return {"user": user, "session_token": emergent_session_token}
+
+
+@api_router.get("/auth/me")
+async def auth_me(user: dict = Depends(get_current_user)):
+    role = await _resolve_role(user.get("role_id"))
+    return {**user, "role": role}
+
+
+@api_router.post("/auth/logout")
+async def auth_logout(request: Request, response: Response, session_token: Optional[str] = Cookie(default=None)):
+    token = session_token
+    if not token:
+        auth = request.headers.get("authorization") or request.headers.get("Authorization")
+        if auth and auth.lower().startswith("bearer "):
+            token = auth.split(" ", 1)[1].strip()
+    if token:
+        await db.user_sessions.delete_one({"session_token": token})
+    response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    return {"ok": True}
+
+
+@api_router.get("/auth/status")
+async def auth_status():
+    """Quick lightweight check the frontend can call to know if any user exists yet."""
+    count = await db.users.count_documents({})
+    return {"any_users": count > 0}
+
+
+# ==================== ORGANIZATIONS & INVITES ====================
+# Each User belongs to exactly one Organization. On first-ever signup:
+#   - Bootstrap a "Default Organization"
+#   - Tag every existing document across owned collections with default_org_id
+#   - Make the first user Director of Default Org
+# Subsequent signups either:
+#   (a) redeem an Invite Code -> join the invite's org with the invite's role
+#   (b) create a new Organization -> become Director of that new org
+#
+# "Owned" collections that gain an org_id column:
+ORG_SCOPED_COLLECTIONS = [
+    "costumes", "equipment", "shows", "locations",
+    "categories", "equipment_categories",
+    "sizing_systems", "equipment_sorting_systems",
+    "students", "flag_categories", "roles",
+    "settings",  # per-org branding, hide_in_use_mode, etc.
+]
+
+
+class Organization(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    name: str
+    slug: str
+    created_by_user_id: Optional[str] = None
+    logo_image_id: Optional[str] = None
+    is_default: bool = False
+    created_at: str
+    updated_at: Optional[str] = None
+
+
+class OrgCreatePayload(BaseModel):
+    name: str
+    logo_image_id: Optional[str] = None
+
+
+class InviteCreatePayload(BaseModel):
+    role_id: str
+    email: Optional[str] = ""
+    expires_days: Optional[int] = 14
+
+
+class InviteRedeemPayload(BaseModel):
+    code: str
+
+
+async def _bootstrap_default_org_if_needed(user_id: str) -> str:
+    """If this is the very first user, create Default Org and tag existing data."""
+    org = await db.organizations.find_one({"is_default": True}, {"_id": 0})
+    if org:
+        return org["id"]
+    now = _now_iso()
+    org_id = f"org_{uuid.uuid4().hex[:12]}"
+    await db.organizations.insert_one({
+        "id": org_id,
+        "name": "Default Organization",
+        "slug": "default",
+        "created_by_user_id": user_id,
+        "logo_image_id": None,
+        "is_default": True,
+        "created_at": now,
+        "updated_at": now,
+    })
+    # Tag every existing document with the default org_id
+    for coll in ORG_SCOPED_COLLECTIONS:
+        try:
+            await db[coll].update_many(
+                {"$or": [{"org_id": {"$exists": False}}, {"org_id": None}]},
+                {"$set": {"org_id": org_id}},
+            )
+        except Exception as e:
+            logger.warning(f"Backfill org_id on {coll} failed: {e}")
+    return org_id
+
+
+async def _create_new_org(name: str, user_id: str, logo_image_id: Optional[str] = None) -> str:
+    name = (name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Organization name required")
+    slug_base = _slugify(name)
+    slug = slug_base
+    n = 2
+    while await db.organizations.find_one({"slug": slug}):
+        slug = f"{slug_base}_{n}"
+        n += 1
+    now = _now_iso()
+    org_id = f"org_{uuid.uuid4().hex[:12]}"
+    await db.organizations.insert_one({
+        "id": org_id,
+        "name": name,
+        "slug": slug,
+        "created_by_user_id": user_id,
+        "logo_image_id": logo_image_id,
+        "is_default": False,
+        "created_at": now,
+        "updated_at": now,
+    })
+    # Seed the new org's roles by cloning from any existing "template" set:
+    # prefer unowned roles (fresh install), else clone from the Default Org.
+    all_roles = await db.roles.find({"$or": [{"org_id": {"$exists": False}}, {"org_id": None}]}, {"_id": 0}).to_list(500)
+    if not all_roles:
+        default_org = await db.organizations.find_one({"is_default": True}, {"_id": 0})
+        if default_org:
+            all_roles = await db.roles.find({"org_id": default_org["id"]}, {"_id": 0}).to_list(500)
+    if not all_roles:
+        # Absolute fallback — seed presets directly
+        for preset in _default_role_presets():
+            preset["org_id"] = org_id
+            await db.roles.insert_one(preset)
+    else:
+        for r in all_roles:
+            clone = {**r, "id": str(uuid.uuid4()), "org_id": org_id, "created_at": now, "updated_at": now}
+            clone.pop("_id", None)
+            await db.roles.insert_one(clone)
+    return org_id
+
+
+async def _ensure_user_has_org(user_doc: dict) -> str:
+    """Return user's org_id, creating & assigning the default org if missing."""
+    if user_doc.get("org_id"):
+        return user_doc["org_id"]
+    org_id = await _bootstrap_default_org_if_needed(user_doc["user_id"])
+    await db.users.update_one({"user_id": user_doc["user_id"]}, {"$set": {"org_id": org_id, "updated_at": _now_iso()}})
+    return org_id
+
+
+async def get_current_org_id(user: dict = Depends(get_current_user)) -> str:
+    org_id = user.get("org_id")
+    if not org_id:
+        raise HTTPException(status_code=428, detail="Onboarding required — join or create an organization first")
+    return org_id
+
+
+@api_router.get("/organizations/mine", response_model=Organization)
+async def my_org(user: dict = Depends(get_current_user)):
+    if not user.get("org_id"):
+        raise HTTPException(status_code=404, detail="No organization")
+    doc = await db.organizations.find_one({"id": user["org_id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Organization not found")
+    return doc
+
+
+@api_router.post("/organizations", response_model=Organization)
+async def create_organization(payload: OrgCreatePayload, user: dict = Depends(get_current_user)):
+    """Onboarding entry point: create a brand-new org and make the current user its Director."""
+    if user.get("org_id"):
+        raise HTTPException(status_code=409, detail="You already belong to an organization")
+    org_id = await _create_new_org(payload.name, user["user_id"], payload.logo_image_id)
+    # Find the Director role within this new org
+    director = await db.roles.find_one({"org_id": org_id, "slug": "director"}, {"_id": 0})
+    role_id = director["id"] if director else None
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"org_id": org_id, "role_id": role_id, "role_slug": "director",
+                   "is_superadmin": user.get("is_superadmin") or True, "updated_at": _now_iso()}},
+    )
+    return await db.organizations.find_one({"id": org_id}, {"_id": 0})
+
+
+@api_router.get("/organizations/members")
+async def list_org_members(user: dict = Depends(get_current_user)):
+    org_id = user.get("org_id")
+    if not org_id:
+        raise HTTPException(status_code=404, detail="No organization")
+    docs = await db.users.find({"org_id": org_id}, {"_id": 0, "password_hash": 0}).to_list(500)
+    # Attach role name
+    for d in docs:
+        rid = d.get("role_id")
+        if rid:
+            r = await db.roles.find_one({"id": rid}, {"_id": 0})
+            d["role_name"] = r.get("name") if r else None
+            d["role_color"] = r.get("color") if r else None
+    docs.sort(key=lambda d: (d.get("name") or d.get("email") or "").lower())
+    return docs
+
+
+class ChangeMemberRolePayload(BaseModel):
+    role_id: str
+
+
+@api_router.put("/organizations/members/{user_id}/role")
+async def change_member_role(user_id: str, payload: ChangeMemberRolePayload, user: dict = Depends(get_current_user)):
+    org_id = user.get("org_id")
+    target = await db.users.find_one({"user_id": user_id, "org_id": org_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found in your organization")
+    role = await db.roles.find_one({"id": payload.role_id})
+    if not role:
+        raise HTTPException(status_code=404, detail="Role not found")
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": {"role_id": payload.role_id, "role_slug": role.get("slug"), "updated_at": _now_iso()}},
+    )
+    return {"ok": True}
+
+
+@api_router.delete("/organizations/members/{user_id}")
+async def remove_member(user_id: str, user: dict = Depends(get_current_user)):
+    if user["user_id"] == user_id:
+        raise HTTPException(status_code=400, detail="You cannot remove yourself")
+    org_id = user.get("org_id")
+    target = await db.users.find_one({"user_id": user_id, "org_id": org_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found in your organization")
+    await db.users.update_one({"user_id": user_id}, {"$set": {"org_id": None, "role_id": None, "role_slug": None}})
+    return {"ok": True}
+
+
+# --- Invites ---
+class Invite(BaseModel):
+    id: str
+    org_id: str
+    role_id: str
+    role_name: Optional[str] = None
+    email: Optional[str] = ""
+    code: str
+    invited_by_user_id: str
+    accepted_by_user_id: Optional[str] = None
+    accepted_at: Optional[str] = None
+    expires_at: str
+    revoked: bool = False
+    created_at: str
+
+
+def _invite_code() -> str:
+    # 12 chars, uppercase, base32-ish for easy typing
+    return "".join(secrets.choice("ABCDEFGHJKMNPQRSTUVWXYZ23456789") for _ in range(10))
+
+
+@api_router.get("/invites")
+async def list_invites(user: dict = Depends(get_current_user)):
+    org_id = user.get("org_id")
+    if not org_id:
+        raise HTTPException(status_code=404, detail="No organization")
+    docs = await db.invites.find({"org_id": org_id}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    # Attach role_name for convenience
+    for d in docs:
+        r = await db.roles.find_one({"id": d.get("role_id")}, {"_id": 0})
+        d["role_name"] = r.get("name") if r else None
+    return docs
+
+
+@api_router.post("/invites", response_model=Invite)
+async def create_invite(payload: InviteCreatePayload, user: dict = Depends(get_current_user)):
+    org_id = user.get("org_id")
+    if not org_id:
+        raise HTTPException(status_code=404, detail="No organization")
+    role = await db.roles.find_one({"id": payload.role_id}, {"_id": 0})
+    if not role:
+        raise HTTPException(status_code=404, detail="Role not found")
+    now = datetime.now(timezone.utc)
+    expiry_days = max(1, min(int(payload.expires_days or 14), 180))
+    doc = {
+        "id": str(uuid.uuid4()),
+        "org_id": org_id,
+        "role_id": payload.role_id,
+        "role_name": role.get("name"),
+        "email": (payload.email or "").strip().lower(),
+        "code": _invite_code(),
+        "invited_by_user_id": user["user_id"],
+        "accepted_by_user_id": None,
+        "accepted_at": None,
+        "expires_at": (now + timedelta(days=expiry_days)).isoformat(),
+        "revoked": False,
+        "created_at": now.isoformat(),
+    }
+    await db.invites.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.delete("/invites/{invite_id}")
+async def revoke_invite(invite_id: str, user: dict = Depends(get_current_user)):
+    org_id = user.get("org_id")
+    res = await db.invites.update_one(
+        {"id": invite_id, "org_id": org_id, "accepted_at": None},
+        {"$set": {"revoked": True}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Invite not found (or already accepted)")
+    return {"ok": True}
+
+
+@api_router.get("/invites/preview/{code}")
+async def preview_invite(code: str):
+    """Public: given a code, show the org name + role for the acceptance screen."""
+    code = (code or "").strip().upper()
+    inv = await db.invites.find_one({"code": code, "revoked": False, "accepted_at": None}, {"_id": 0})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invalid invite code")
+    expires_at = inv.get("expires_at")
+    if expires_at:
+        try:
+            ea = datetime.fromisoformat(expires_at)
+            if ea.tzinfo is None:
+                ea = ea.replace(tzinfo=timezone.utc)
+            if ea < datetime.now(timezone.utc):
+                raise HTTPException(status_code=410, detail="Invite has expired")
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+    org = await db.organizations.find_one({"id": inv["org_id"]}, {"_id": 0})
+    role = await db.roles.find_one({"id": inv["role_id"]}, {"_id": 0})
+    return {
+        "code": inv["code"],
+        "org_name": org.get("name") if org else None,
+        "role_name": role.get("name") if role else None,
+    }
+
+
+@api_router.post("/invites/redeem")
+async def redeem_invite(payload: InviteRedeemPayload, user: dict = Depends(get_current_user)):
+    code = (payload.code or "").strip().upper()
+    if not code:
+        raise HTTPException(status_code=400, detail="Code required")
+    inv = await db.invites.find_one({"code": code, "revoked": False, "accepted_at": None}, {"_id": 0})
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invalid or already-used invite")
+    # Check expiry
+    try:
+        ea = datetime.fromisoformat(inv.get("expires_at"))
+        if ea.tzinfo is None:
+            ea = ea.replace(tzinfo=timezone.utc)
+        if ea < datetime.now(timezone.utc):
+            raise HTTPException(status_code=410, detail="Invite has expired")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+    if user.get("org_id") and user["org_id"] != inv["org_id"]:
+        raise HTTPException(status_code=409, detail="You already belong to a different organization")
+    role = await db.roles.find_one({"id": inv["role_id"]}, {"_id": 0})
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"org_id": inv["org_id"], "role_id": inv["role_id"],
+                   "role_slug": role.get("slug") if role else None, "updated_at": _now_iso()}},
+    )
+    now = _now_iso()
+    await db.invites.update_one(
+        {"id": inv["id"]},
+        {"$set": {"accepted_by_user_id": user["user_id"], "accepted_at": now}},
+    )
+    return {"ok": True, "org_id": inv["org_id"]}
+
+
 # --------- App Setup ---------
 app.include_router(api_router)
+
+
+# --- API auth gate ---
+# Every /api/* request needs a valid session token EXCEPT the endpoints listed here.
+PUBLIC_API_PATHS = {
+    "/api/",              # health / root
+    "/api/auth/register",
+    "/api/auth/login",
+    "/api/auth/session",
+    "/api/auth/logout",
+    "/api/auth/me",       # returns 401 itself when unauth'd
+    "/api/auth/status",
+}
+
+
+def _path_is_public(path: str) -> bool:
+    if not path.startswith("/api/"):
+        return True  # not an API route (shouldn't happen — Kubernetes ingress routes only /api here)
+    if path in PUBLIC_API_PATHS:
+        return True
+    # Public: image fetching (public-embed)
+    if path.startswith("/api/images/"):
+        return True
+    # Public: preview an invite before signing in (used by /invite/<code>)
+    if path.startswith("/api/invites/preview/"):
+        return True
+    return False
+
+
+@app.middleware("http")
+async def require_auth_middleware(request: Request, call_next):
+    from fastapi.responses import JSONResponse
+    path = request.url.path
+    # Preflight always passes
+    if request.method == "OPTIONS":
+        return await call_next(request)
+    if _path_is_public(path):
+        return await call_next(request)
+    # Validate token
+    token = request.cookies.get(SESSION_COOKIE_NAME)
+    if not token:
+        auth = request.headers.get("authorization") or request.headers.get("Authorization")
+        if auth and auth.lower().startswith("bearer "):
+            token = auth.split(" ", 1)[1].strip()
+    if not token:
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+    sess = await db.user_sessions.find_one({"session_token": token}, {"_id": 0})
+    if not sess:
+        return JSONResponse({"detail": "Invalid session"}, status_code=401)
+    expires_at = sess.get("expires_at")
+    if isinstance(expires_at, str):
+        try:
+            expires_at = datetime.fromisoformat(expires_at)
+        except Exception:
+            expires_at = None
+    if expires_at is not None:
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at < datetime.now(timezone.utc):
+            return JSONResponse({"detail": "Session expired"}, status_code=401)
+    # Stash user_id for downstream handlers if they want it
+    request.state.session_user_id = sess.get("user_id")
+    return await call_next(request)
+
 
 app.add_middleware(
     CORSMiddleware,

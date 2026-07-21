@@ -1,0 +1,72 @@
+{
+  "summary": "Iteration 10 (LUXE Auth+RBAC+Students+Orgs) — 18/19 new pytest tests pass; 1 real backend bug found in cross-org role isolation. Full suite: 49 passed / 5 failed (1 iter10 bug, 4 pre-existing legacy tests that still use removed `original_show_id`/`additional_show_ids` schema). Verified: auth register/login/me/logout flow with role+permissions, protected /api/costumes returning 401 unauthenticated and 200 with cookie, bearer-token support, /api/auth/status public. Verified Students CRUD + config (34-key measurement/size defaults) + stats + invite gate. Verified Roles: 10 presets seeded, 34 permission keys across 7 groups, POST clone_from carries permissions, PUT updates persist, DELETE blocked for is_system, reset-defaults works. Verified Shows: PUT is_live=true → attached costumes flip to in_use/current_show_id via `shows.show_id` match; is_live=false clears them. Verified _detach_item_from_all_maps runs on POST /locations/move-item and DELETE /costumes/{id}. Verified Orgs+Invites: create org promotes caller to director, /members lists members with role_name, invite code is exactly 10 chars, /invites/preview/{code} is public, /invites/redeem attaches new user to org+role. Frontend verified via Playwright: unauth /-> /login, login-email/login-password/login-submit render, admin login redirects to /, header shows user-menu-toggle chip with name, /students renders students-page + students-new-btn + student cards, /settings shows Roles + Organization tabs, register (via 'Create one' link) with fresh email lands on /onboarding.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/roles + GET /api/roles + POST /api/organizations",
+        "issue": "Cross-org role isolation broken. Repro: (User A) register → create org → POST /roles {name:'X'}. (User B) register → POST /organizations. GET /api/roles as User B now returns role 'X'. Root cause: `create_role` (server.py ~L2734) never sets `org_id` on the new document, so it ends up matching `{$or:[{org_id:{$exists:false}},{org_id:null}]}`. Then `_create_new_org` (server.py ~L3220) clones ALL unowned roles into the newly-created org, so User B's org inherits User A's custom role. Impact: every custom role created by any director will leak into every future org, and (worse) can grant privileges the director never intended. Priority: HIGH/P0.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST /api/organizations create org role cloning",
+        "issue": "`_create_new_org` (server.py ~L3220) clones from unowned roles FIRST — this is the seeding path used on fresh installs but also becomes a leaky footgun once any unowned role exists. Recommend: always clone from the Default Organization (by is_default:true) and only fall back to seeding presets if no Default exists."
+      },
+      {
+        "endpoint": "GET /api/roles (fallback branch, server.py ~L2719)",
+        "issue": "If a user's org has zero roles, endpoint falls back to returning unowned/global roles. Combined with the leaky POST /roles above, this is a second path that can expose cross-tenant data. Recommend: never expose unowned roles — always ensure the caller's org has roles by lazily cloning from Default Org."
+      },
+      {
+        "endpoint": "POST /api/auth/register",
+        "issue": "Password minimum is 8 chars — no upper/lower/digit/symbol check. Acceptable trade-off, but flag: docs test creds like 'Passw0rd!23' pass; 'password' also passes. Recommend adding a light strength check or making the requirement explicit in the payload error."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "Header user chip",
+        "issues": ["Header identifies the user via testid `user-menu-toggle` (button labelled with the user's name, e.g. 'LUXE Admin'). Review spec called this a 'user chip showing name + email + role' — email + role are not visible on the header itself, they appear only after clicking the menu toggle. Not a bug but worth confirming with product; if the spec is strict, expose email + role inline."]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration10.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/iter10_results.xml",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "FIX ROOT CAUSE: In POST /api/roles (server.py ~L2734), set `org_id = current_user.org_id` on the new role document (require auth via Depends(get_current_user)) so custom roles are scoped from creation.",
+    "Harden POST /api/organizations `_create_new_org` (server.py ~L3220): always clone from the Default Organization when it exists; only seed presets from `_default_role_presets()` when there is literally no other org to copy from. Never clone from `{org_id:null}` — that path is what leaked TEST_ISO_A into future orgs.",
+    "Remove the unowned-role fallback in GET /api/roles (server.py ~L2720) once above two fixes land. Alternatively, if the user has an org but their org has zero roles, lazily bootstrap the org's roles from Default and return those (never return unowned roles).",
+    "OPTIONAL: run a one-time cleanup: `db.roles.updateMany({org_id: null}, {$set: {org_id: <default_org_id>}})` OR delete unowned duplicates, then remove any custom role that leaked into wrong orgs.",
+    "OPTIONAL (frontend): expose email + role inline on the header user chip so the /login spec ('chip shows name + email + role') is fully satisfied without opening the menu."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now 3641 lines — auth, RBAC, students, orgs, and invites all landed in one file. Splitting into `routers/{auth,students,roles,orgs,invites}.py` is overdue and would have caught the missing `org_id` on POST /roles at review time.",
+    "Auth middleware (server.py L3499) short-circuits `/api/auth/me` to always fall through and lets the handler return 401. That works but couples middleware bypass logic and handler error handling — a small comment would help future readers.",
+    "`_new_token()` uses `secrets.token_urlsafe(48)` (64 chars) yet `_invite_code()` uses a 10-char base32-ish alphabet — mixing conventions is fine but the docstring on Invite still says '12 chars'; update the comment.",
+    "`_create_new_org` cloning path: mutating the dict with `{**r, 'id': new_uuid, 'org_id': org_id}` then `pop('_id')` — safer to pop _id first, but functionally OK.",
+    "PUT /api/organizations/members/{user_id}/role does not verify that `payload.role_id` belongs to the caller's org. A director could pass a role_id belonging to another org (if they learned it) and reassign a member's role to it. Recommend `db.roles.find_one({id, org_id})`.",
+    "POST /api/invites accepts any role_id — same concern as above: check `role_id` belongs to caller's org.",
+    "GET /api/students, /api/students/stats — the review spec lists these as org-scoped, but the implementation queries `db.students.find({})` with no org filter. The problem statement's own agent-context-note acknowledges this as a documented P0 followup; keep on the list for the next iteration."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (session fixture now logs in as admin@luxe.test so pre-existing tests run under the new auth gate)",
+    "/app/backend/tests/test_iteration10.py (new: 19 tests covering Auth, Students, Roles, Show is_live, Map detach, Orgs+Invites)"
+  ],
+  "success_rate": {
+    "backend": "18/19 iter10 tests pass (94.7%). Legacy suite: 45/49 pass — 4 pre-existing failures due to earlier schema change (original_show_id → shows[]), not iter10 regressions.",
+    "frontend": "Smoke test passed: /login → login → / → user chip → /students → /settings (Roles+Organization tabs) → /onboarding for new users. No console errors observed."
+  },
+  "test_credentials": "admin@luxe.test / LuxeAdmin!23 (existing Director of Default Organization). invitee@luxe.test / Invitee!23 exists per /app/memory/test_credentials.md.",
+  "seed_data_creation": "Iteration 10 tests create ephemeral users prefixed TEST_… , orgs prefixed TEST_ORG_… / TEST_NEWORG_…, students prefixed TEST_Alice, roles prefixed TEST_ROLE_/TEST_ISO_. Custom roles + students + costumes + shows + locations are cleaned up in try/finally. Test-created USERS and ORGs are intentionally left in Mongo (there is no delete-user API) — safe to purge with the mongosh command in /app/memory/test_credentials.md.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 10 shipped auth, RBAC, students, orgs, invites. The one HIGH-priority open bug is roles cross-org leakage — POST /api/roles doesn't set org_id, so custom roles created before an org exists end up cloned into every later org via `_create_new_org`. Re-verify by running test_iteration10.py::TestRoles::test_roles_org_scoped_isolation after the fix. Test credentials: admin@luxe.test / LuxeAdmin!23. Frontend testids observed: login-email, login-password, login-submit, user-menu-toggle, nav-students, students-page, students-new-btn, settings-tab-roles, settings-tab-organization. Registration link is a plain 'Create one' text link (no testid). /onboarding renders for signed-in users without an org_id — cards ('Create new org' / 'Join with invite') were not text-matched in my quick smoke; visually confirm they render (may just be different wording).",
+  "rca of the issue": "Cross-org role leakage RCA — Steps to reproduce: (1) User A registers, becomes Director of Default Org (or new org). (2) User A POST /api/roles {name:'X'} — response returns the role with no org_id. (3) User B registers on a fresh email → org_id is null. (4) User B POST /api/organizations — `_create_new_org` at server.py:3218-3234 queries `db.roles.find({$or:[{org_id:{$exists:false}},{org_id:null}]})` to seed the new org's roles. Role 'X' matches. It is cloned into User B's org. (5) User B calls GET /api/roles — sees 'X'. Fix: (a) POST /api/roles must set `org_id = user.org_id` on insert. (b) `_create_new_org` should clone from `{org_id: default_org.id}` rather than unowned roles. Both changes together close the loophole. Mitigation until fixed: manually run in mongosh: `db.roles.updateMany({org_id: null, is_system: {$ne: true}}, {$set: {org_id: '<default_org_id>'}})` and remove any TEST_ISO_ artefacts from tenant orgs."
+}

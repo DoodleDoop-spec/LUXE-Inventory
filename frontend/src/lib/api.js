@@ -5,6 +5,7 @@ export const API = `${BACKEND_URL}/api`;
 
 export const api = axios.create({
   baseURL: API,
+  withCredentials: true,
 });
 
 export const imageUrl = (image_id) => (image_id ? `${API}/images/${image_id}` : null);

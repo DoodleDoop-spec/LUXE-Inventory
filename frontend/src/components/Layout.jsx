@@ -1,13 +1,15 @@
 import { Outlet, NavLink, Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect, useRef } from "react";
 import { useSettings } from "@/context/SettingsContext";
-import { LayoutDashboard, Package, MapPin, Settings as SettingsIcon, Search, X, Film, Flag, Menu, Wrench } from "lucide-react";
+import { LayoutDashboard, Package, MapPin, Settings as SettingsIcon, Search, X, Film, Flag, Menu, Wrench, Users, LogOut, User as UserIcon } from "lucide-react";
 import HangerIcon from "@/components/HangerIcon";
+import { useAuth } from "@/context/AuthContext";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, testId: "nav-dashboard" },
   { to: "/inventory", label: "Costumes", icon: HangerIcon, testId: "nav-inventory" },
   { to: "/equipment", label: "Equipment", icon: Wrench, testId: "nav-equipment" },
+  { to: "/students", label: "Students", icon: Users, testId: "nav-students" },
   { to: "/shows", label: "Shows", icon: Film, testId: "nav-shows" },
   { to: "/locations", label: "Storage", icon: MapPin, testId: "nav-locations" },
   { to: "/flags", label: "Flags", icon: Flag, testId: "nav-flags" },
@@ -19,8 +21,10 @@ export default function Layout() {
   const navigate = useNavigate();
   const [globalQ, setGlobalQ] = useState("");
   const { settings } = useSettings();
+  const { user, logout } = useAuth();
   const [searchOpen, setSearchOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const searchInputRef = useRef(null);
 
   useEffect(() => {
@@ -142,6 +146,56 @@ export default function Layout() {
               >
                 {mobileNavOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
               </button>
+
+              {/* User chip */}
+              {user && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setUserMenuOpen((v) => !v)}
+                    data-testid="user-menu-toggle"
+                    className="flex items-center gap-2 h-9 pl-1.5 pr-3 border border-[#E4E4E7] hover:border-[#09090B]"
+                    aria-label="Account menu"
+                  >
+                    <span className="w-6 h-6 rounded-full bg-[#F4F4F5] flex items-center justify-center overflow-hidden shrink-0">
+                      {user.picture ? (
+                        <img src={user.picture} alt={user.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <UserIcon className="h-3.5 w-3.5 text-[#71717A]" />
+                      )}
+                    </span>
+                    <span className="hidden sm:inline text-xs font-medium text-[#09090B] truncate max-w-[120px]">
+                      {user.name || user.email}
+                    </span>
+                  </button>
+                  {userMenuOpen && (
+                    <>
+                      <div className="fixed inset-0 z-30" onClick={() => setUserMenuOpen(false)} />
+                      <div className="absolute right-0 mt-2 w-64 bg-white border border-[#E4E4E7] shadow-md z-40" data-testid="user-menu">
+                        <div className="px-4 py-3 border-b border-[#E4E4E7]">
+                          <div className="text-xs font-mono-label text-[#71717A]">SIGNED IN AS</div>
+                          <div className="text-sm font-medium text-[#09090B] mt-1 truncate">{user.name}</div>
+                          <div className="text-xs text-[#71717A] truncate">{user.email}</div>
+                          {user.role?.name && (
+                            <div className="mt-2 inline-flex items-center gap-1 text-[10px] font-mono-label tracking-widest bg-[#F4F4F5] px-2 py-0.5">
+                              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: user.role?.color || "#71717A" }} />
+                              {user.role.name.toUpperCase()}
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={async () => { setUserMenuOpen(false); await logout(); navigate("/login", { replace: true }); }}
+                          data-testid="logout-btn"
+                          className="w-full text-left px-4 py-2.5 text-sm hover:bg-[#FAFAFA] flex items-center gap-2 text-[#EF4444]"
+                        >
+                          <LogOut className="h-4 w-4" /> Sign out
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 

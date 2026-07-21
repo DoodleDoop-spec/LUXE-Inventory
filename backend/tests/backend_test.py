@@ -15,10 +15,21 @@ MONGO_URL = os.environ["MONGO_URL"]
 DB_NAME = os.environ["DB_NAME"]
 
 
+ADMIN_EMAIL = "admin@luxe.test"
+ADMIN_PASSWORD = "LuxeAdmin!23"
+
+
 @pytest.fixture(scope="session")
 def session():
     s = requests.Session()
     s.headers.update({"Content-Type": "application/json"})
+    # Login as admin so protected endpoints return 200 (iteration 10 auth gate)
+    r = s.post(f"{API}/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD})
+    if r.status_code != 200:
+        # try register (first-user bootstrap or hybrid attach)
+        s.post(f"{API}/auth/register", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD, "name": "LUXE Admin"})
+        r = s.post(f"{API}/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD})
+    assert r.status_code == 200, f"Cannot log in as admin: {r.status_code} {r.text}"
     return s
 
 

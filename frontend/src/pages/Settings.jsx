@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo, useRef } from "react";
 import { api } from "@/lib/api";
 import { useSettings } from "@/context/SettingsContext";
 import { useConfirm } from "@/components/ConfirmDialog";
-import { Plus, Trash2, Tag, Save, Ruler, ChevronDown, ChevronRight, X, Film, Upload, Image as ImageIcon, LinkIcon, Settings as SettingsIcon, MapPin, Pencil, Wrench } from "lucide-react";
+import { Plus, Trash2, Tag, Save, Ruler, ChevronDown, ChevronRight, X, Film, Upload, Image as ImageIcon, LinkIcon, Settings as SettingsIcon, MapPin, Pencil, Wrench, ShieldCheck, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +14,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import LocationTree from "@/components/LocationTree";
 import CollapsibleBox from "@/components/CollapsibleBox";
+import RolesSettings from "@/pages/RolesSettings";
+import OrgSettings from "@/pages/OrgSettings";
 
 export default function Settings() {
   const { settings: globalSettings, updateSettings: pushSettings, refreshSettings } = useSettings();
@@ -303,6 +305,12 @@ export default function Settings() {
           </TabsTrigger>
           <TabsTrigger value="shows" data-testid="settings-tab-shows" className="rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-11 px-5 gap-1.5">
             <Film className="h-3.5 w-3.5" /> Shows
+          </TabsTrigger>
+          <TabsTrigger value="roles" data-testid="settings-tab-roles" className="rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-11 px-5 gap-1.5">
+            <ShieldCheck className="h-3.5 w-3.5" /> Roles
+          </TabsTrigger>
+          <TabsTrigger value="org" data-testid="settings-tab-org" className="rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-11 px-5 gap-1.5">
+            <Building2 className="h-3.5 w-3.5" /> Organization
           </TabsTrigger>
         </TabsList>
 
@@ -724,6 +732,14 @@ export default function Settings() {
           </div>
         </div>
       </section>
+        </TabsContent>
+
+        <TabsContent value="roles" className="mt-6" data-testid="settings-content-roles">
+          <RolesSettings />
+        </TabsContent>
+
+        <TabsContent value="org" className="mt-6" data-testid="settings-content-org">
+          <OrgSettings />
         </TabsContent>
       </Tabs>
     </div>
