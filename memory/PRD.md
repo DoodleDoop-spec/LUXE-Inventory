@@ -137,6 +137,16 @@ CSV importers, shortage alerts, printable run sheets, YouTube scrubber.
 
 **Iteration 22 test summary** — 10/10 backend pytest green (imports dry-run + real, duplicate/invalid detection, auto-create categories + locations, shortage computed on list/detail/update). Frontend Playwright confirmed wizard step counter, shortage badges/banner, print-sheet DOM (one page per student), VTS DOM presence.
 
+### Iteration 23 — Feb 2026 (this session)
+Import history + undo, permission-aware UI, show manifest PDF.
+
+- **Import History with Undo** — every non-dry-run costume/equipment import now writes an `import_batches` doc capturing the created IDs, actor, dupe + invalid counts. New endpoints `GET /api/imports` (newest 200 batches) and `POST /api/imports/{id}/undo` (deletes each id from the right collection, marks the batch `undone`, 409 on double-undo, 404 on unknown). Reusable `ImportHistoryDialog` shows a compact log with relative timestamps and per-row **Undo batch** buttons. Auto-created categories/locations are intentionally kept so undo is a data-only rollback.
+- **Permission-Aware UI** — `Import CSV` + `Import history` on Inventory now gated on `costumes.create`; same buttons on Equipment gated on `equipment.create`; `Print Run Sheet` on Wardrobe gated on `students.view`; `Print manifest` on Show detail gated on `costumes.view`. Uses the existing `useAuth().hasPerm(key)` helper, which respects `is_superadmin` too.
+- **Show Manifest PDF** — new **Print manifest** button on `/show/:id` fires a print job that emits a hidden `.show-manifest-only` DOM tree via an `html.printing-manifest` class + `@media print` rules. Manifest is a single table with 42×52 thumbnails, name (+ ORIGINAL flag for originals), category, location (+ sub-location), quantity and a check box per row. Header shows show name, year, total pieces, printed timestamp and show notes.
+- **Data fix** — admin@luxe.test's stale `role_id` was re-linked to the current Director role in the Default Org (also `is_superadmin=true`). Fixes empty-permissions state that caused the perm-gated buttons to be hidden for the test director.
+
+**Iteration 23 test summary** — 5/5 backend pytest green (imports batch write, dry-run does NOT record, undo deletes + flips flag, double-undo 409, unknown 404). Frontend Playwright confirmed: history dialog on Inventory + Equipment (filter working), wardrobe print visible for director, show manifest DOM has one row per attached costume, UI undo flow verified end-to-end.
+
 **Known followup for Iteration 18** — extend org scoping across the remaining read/write endpoints (costumes, equipment, shows, etc.). Today, roles are org-scoped; other collections still read globally after the Default-Org backfill. Since existing customers all live inside the Default Org this is safe; new orgs will need explicit filtering when the app opens to true multi-tenancy.
 
 ## Backlog
