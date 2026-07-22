@@ -3,7 +3,7 @@ import { useLocation, useNavigate, Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { useSettings } from "@/context/SettingsContext";
-import { Plus, Search, LayoutGrid, List, X, MapPin, ChevronRight, ChevronDown, Flag, StickyNote, SlidersHorizontal, ArrowUpDown, Calendar, Image as ImageIcon, Package, Tag as TagIcon, Sparkles } from "lucide-react";
+import { Plus, Search, LayoutGrid, List, X, MapPin, ChevronRight, ChevronDown, Flag, StickyNote, SlidersHorizontal, ArrowUpDown, Calendar, Image as ImageIcon, Package, Tag as TagIcon, Sparkles, AlertTriangle, FileUp } from "lucide-react";
 import { getCostumeFlagColor } from "@/lib/flagColor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import CostumeFormDialog from "@/components/CostumeFormDialog";
+import ImportWizard from "@/components/ImportWizard";
 import { toast } from "sonner";
 
 const ALL = "__all__";
@@ -68,6 +69,7 @@ export default function Inventory() {
   const [editing, setEditing] = useState(null);
   const [dragging, setDragging] = useState(null); // costume being dragged
   const [dragOverTarget, setDragOverTarget] = useState(null); // "cat:<name>" or "loc:<path>"
+  const [importOpen, setImportOpen] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -250,6 +252,14 @@ export default function Inventory() {
           </div>
           <Button data-testid="add-costume-btn" onClick={handleNew} className="bg-[#09090B] hover:bg-[#27272A] rounded-none text-white h-10">
             <Plus className="h-4 w-4 mr-1" />Add Costume
+          </Button>
+          <Button
+            data-testid="import-costumes-btn"
+            variant="outline"
+            onClick={() => setImportOpen(true)}
+            className="rounded-none h-10 border-[#E4E4E7]"
+          >
+            <FileUp className="h-4 w-4 mr-1" />Import CSV
           </Button>
         </div>
       </div>
@@ -606,6 +616,28 @@ export default function Inventory() {
         groups={groups}
         onSaved={handleSaved}
       />
+
+      <ImportWizard
+        entity="costumes"
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onDone={() => fetchAll()}
+        sizeSystems={sizingSystems}
+        targetFields={[
+          { key: "name", label: "Name", required: true, aliases: ["title", "costume"] },
+          { key: "category", label: "Category", aliases: ["cat", "type"] },
+          { key: "subcategory", label: "Subcategory", aliases: ["subcat"] },
+          { key: "location", label: "Location", aliases: ["storage", "loc", "where"] },
+          { key: "sub_location", label: "Sub-location", aliases: ["sublocation", "rack", "shelf", "bin"] },
+          { key: "notes", label: "Notes", aliases: ["note", "description", "desc"] },
+          { key: "creator", label: "Creator", aliases: ["maker", "designer", "made by"] },
+          { key: "keywords", label: "Keywords (comma-sep)", aliases: ["tags", "keyword"] },
+          { key: "total_quantity", label: "Total quantity", aliases: ["quantity", "qty", "count", "total"] },
+          { key: "origin_year", label: "Origin year", aliases: ["year"] },
+          { key: "buy_link", label: "Buy link", aliases: ["url", "link", "purchase"] },
+          { key: "sorting_system", label: "Sorting system", aliases: ["sizingsystem", "sortingsystem", "system"] },
+        ]}
+      />
     </div>
   );
 }
@@ -687,6 +719,11 @@ function CostumeCard({ costume, onEdit, onDelete, sizingSystems, showsById, cate
             <div className="mt-1 text-[10px] font-mono-label tabular-nums text-[#71717A]" data-testid={`in-use-count-${costume.id}`}>
               <span className="text-[#10B981]">{costume.in_use_quantity || 0}</span> in-use ·
               <span className="text-[#09090B] ml-1">{Math.max(0, (costume.total_quantity || 0) - (costume.in_use_quantity || 0))}</span> free
+            </div>
+          )}
+          {costume.shortage && (
+            <div className="mt-1 inline-flex items-center gap-1 bg-[#FEF2F2] border border-[#EF4444] text-[#7F1D1D] px-1.5 py-0.5 text-[9px] font-mono-label tracking-widest" data-testid={`shortage-badge-${costume.id}`} title={`${(costume.assigned_student_ids || []).length} students assigned but only ${costume.in_use_quantity || 0} piece(s) available`}>
+              <AlertTriangle className="h-2.5 w-2.5" /> SHORT · {(costume.assigned_student_ids || []).length - (costume.in_use_quantity || 0)}
             </div>
           )}
         </div>

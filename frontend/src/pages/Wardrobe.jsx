@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
-import { User as UserIcon, Shirt, Filter, Users as UsersIcon, Film, Sparkles } from "lucide-react";
+import { User as UserIcon, Shirt, Filter, Users as UsersIcon, Film, Sparkles, AlertTriangle, Printer, MapPin as MapPinIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
 export default function Wardrobe() {
@@ -13,20 +14,23 @@ export default function Wardrobe() {
   const [q, setQ] = useState("");
   const [showFilter, setShowFilter] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
+  const [org, setOrg] = useState(null);
 
   useEffect(() => {
     (async () => {
       try {
-        const [s, c, sh, cats] = await Promise.all([
+        const [s, c, sh, cats, settings] = await Promise.all([
           api.get("/students"),
           api.get("/costumes"),
           api.get("/shows"),
           api.get("/student-categories"),
+          api.get("/settings").catch(() => ({ data: {} })),
         ]);
         setStudents(s.data);
         setCostumes(c.data);
         setShows(sh.data);
         setCategories(cats.data);
+        setOrg(settings.data || {});
       } catch {
         toast.error("Failed to load wardrobe data");
       }
@@ -75,9 +79,21 @@ export default function Wardrobe() {
   }, [students, inUse, q, categoryFilter, showFilter]);
 
   const totalAssigned = columns.columns.reduce((n, col) => n + col.costumes.length, 0);
+  const shortages = useMemo(() => inUse.filter((c) => c.shortage), [inUse]);
+  const currentShow = showFilter ? shows.find((s) => s.id === showFilter) : null;
+
+  const handlePrint = () => {
+    // Add class so global @media print rules kick in
+    document.documentElement.classList.add("printing-run-sheet");
+    // Give React a tick to render the print-only DOM (already static here), then print
+    setTimeout(() => {
+      window.print();
+      document.documentElement.classList.remove("printing-run-sheet");
+    }, 50);
+  };
 
   return (
-    <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-8 space-y-6" data-testid="wardrobe-page">
+    <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-8 space-y-6 wardrobe-screen" data-testid="wardrobe-page">
       <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
         <div>
           <div className="eyebrow flex items-center gap-2"><Shirt className="h-3 w-3" /> WARDROBE / SHOW NIGHT</div>
@@ -119,6 +135,14 @@ export default function Wardrobe() {
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
+          <Button
+            data-testid="wardrobe-print-btn"
+            onClick={handlePrint}
+            disabled={columns.columns.length === 0}
+            className="bg-[#09090B] hover:bg-[#27272A] rounded-none text-white h-11"
+          >
+            <Printer className="h-4 w-4 mr-1" /> Print Run Sheet
+          </Button>
         </div>
       </div>
 
@@ -129,6 +153,36 @@ export default function Wardrobe() {
         <Stat label="Live shows" value={shows.filter((s) => s.is_live).length} icon={<Film className="h-4 w-4" />} testId="wardrobe-stat-live" />
         <Stat label="Unassigned in-use" value={columns.unassigned.length} icon={<Sparkles className="h-4 w-4" />} testId="wardrobe-stat-unassigned" />
       </div>
+
+      {/* Shortage alert banner */}
+      {shortages.length > 0 && (
+        <div className="border border-[#EF4444] bg-[#FEF2F2] p-4" data-testid="wardrobe-shortage-banner">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-[#EF4444] shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <div className="eyebrow text-[#7F1D1D]">ASSIGNMENT ALERT · {shortages.length} SHORTAGE{shortages.length === 1 ? "" : "S"}</div>
+              <p className="text-sm text-[#7F1D1D] mt-1">
+                These in-use costumes have more assigned students than pieces available. Add stock, reassign, or duplicate before showtime.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {shortages.map((c) => (
+                  <Link
+                    key={c.id}
+                    to={`/costume/${c.id}`}
+                    data-testid={`wardrobe-shortage-${c.id}`}
+                    className="inline-flex items-center gap-1 bg-white border border-[#EF4444] text-[#7F1D1D] px-2 py-0.5 text-xs hover:bg-[#FEE2E2]"
+                  >
+                    <span className="font-medium">{c.name}</span>
+                    <span className="text-[10px] tabular-nums">
+                      {c.in_use_quantity || 0}/{(c.assigned_student_ids || []).length}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Kanban */}
       {columns.columns.length === 0 ? (
@@ -167,7 +221,7 @@ export default function Wardrobe() {
                 </div>
                 <div className="p-2 space-y-1.5 max-h-[500px] overflow-y-auto">
                   {col.costumes.map((c) => (
-                    <Link key={c.id} to={`/costume/${c.id}`} data-testid={`wardrobe-cost-${c.id}`} className="block border border-[#E4E4E7] hover:border-[#09090B] p-2 group">
+                    <Link key={c.id} to={`/costume/${c.id}`} data-testid={`wardrobe-cost-${c.id}`} className={`block border p-2 group ${c.shortage ? "border-[#EF4444] bg-[#FEF2F2] hover:border-[#7F1D1D]" : "border-[#E4E4E7] hover:border-[#09090B]"}`}>
                       <div className="flex items-start gap-2">
                         <div className="w-10 h-10 image-empty overflow-hidden flex items-center justify-center shrink-0">
                           {c.image_id ? (
@@ -181,11 +235,18 @@ export default function Wardrobe() {
                           <div className="text-[10px] text-[#71717A] truncate">
                             {c.category || "—"}{c.sub_location ? ` · ${c.sub_location}` : c.location ? ` · ${c.location}` : ""}
                           </div>
-                          {c.current_show_id && showsById[c.current_show_id] && (
-                            <div className="mt-1 text-[9px] font-mono-label text-white bg-[#10B981] px-1 inline-flex items-center gap-1">
-                              <Film className="h-2.5 w-2.5" /> {showsById[c.current_show_id].name}
-                            </div>
-                          )}
+                          <div className="mt-1 flex flex-wrap items-center gap-1">
+                            {c.current_show_id && showsById[c.current_show_id] && (
+                              <div className="text-[9px] font-mono-label text-white bg-[#10B981] px-1 inline-flex items-center gap-1">
+                                <Film className="h-2.5 w-2.5" /> {showsById[c.current_show_id].name}
+                              </div>
+                            )}
+                            {c.shortage && (
+                              <div className="text-[9px] font-mono-label text-white bg-[#EF4444] px-1 inline-flex items-center gap-1" data-testid={`wardrobe-cost-shortage-${c.id}`}>
+                                <AlertTriangle className="h-2.5 w-2.5" /> SHORT
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </Link>
@@ -212,6 +273,117 @@ export default function Wardrobe() {
           </div>
         </div>
       )}
+
+      {/* Printable run sheet — hidden on screen, shown one page per student when printing */}
+      <PrintableRunSheet
+        columns={columns.columns}
+        showsById={showsById}
+        catsById={catsById}
+        currentShow={currentShow}
+        org={org || {}}
+      />
+    </div>
+  );
+}
+
+function PrintableRunSheet({ columns, showsById, catsById, currentShow, org }) {
+  const printedAt = new Date().toLocaleString();
+  return (
+    <div className="wardrobe-print-only" data-testid="wardrobe-print-sheet" aria-hidden="true">
+      {columns.map((col) => {
+        const student = col.student;
+        const cat = catsById[student.category_id];
+        const fullName = [student.first_name, student.last_name].filter(Boolean).join(" ") || student.display_name || "Unnamed";
+        return (
+          <section key={student.id} className="run-sheet-page" data-testid={`run-sheet-page-${student.id}`}>
+            <header className="run-sheet-header">
+              <div className="run-sheet-eyebrow">
+                {(org.org_name || "WARDROBE RUN SHEET").toUpperCase()} {currentShow ? `· ${currentShow.name.toUpperCase()}` : ""}
+              </div>
+              <h1 className="run-sheet-title">{fullName}</h1>
+              <div className="run-sheet-meta">
+                {cat && <span className="run-sheet-tag" style={{ borderColor: cat.color }}>{cat.name}</span>}
+                {student.grade && <span>Grade {student.grade}</span>}
+                {student.pronouns && <span>{student.pronouns}</span>}
+                <span className="run-sheet-count">{col.costumes.length} costume{col.costumes.length === 1 ? "" : "s"}</span>
+              </div>
+            </header>
+
+            {(student.sizes && Object.keys(student.sizes).some((k) => (student.sizes[k] || "").trim())) ||
+             (student.measurements && Object.keys(student.measurements).some((k) => (student.measurements[k] || "").trim())) ? (
+              <div className="run-sheet-sizes">
+                <div className="run-sheet-subtitle">SIZES &amp; MEASUREMENTS</div>
+                <div className="run-sheet-size-grid">
+                  {Object.entries(student.sizes || {}).filter(([, v]) => (v || "").trim()).map(([k, v]) => (
+                    <div key={`s-${k}`} className="run-sheet-size-cell">
+                      <div className="run-sheet-size-label">{k}</div>
+                      <div className="run-sheet-size-val">{v}</div>
+                    </div>
+                  ))}
+                  {Object.entries(student.measurements || {}).filter(([, v]) => (v || "").trim()).map(([k, v]) => (
+                    <div key={`m-${k}`} className="run-sheet-size-cell">
+                      <div className="run-sheet-size-label">{k}</div>
+                      <div className="run-sheet-size-val">{v}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="run-sheet-costumes">
+              <div className="run-sheet-subtitle">ASSIGNED COSTUMES</div>
+              {col.costumes.map((c) => {
+                const show = c.current_show_id ? showsById[c.current_show_id] : null;
+                return (
+                  <div key={c.id} className="run-sheet-costume" data-testid={`run-sheet-costume-${c.id}`}>
+                    <div className="run-sheet-costume-img">
+                      {c.image_id ? (
+                        <img src={`${process.env.REACT_APP_BACKEND_URL}/api/images/${c.image_id}`} alt="" />
+                      ) : null}
+                    </div>
+                    <div className="run-sheet-costume-body">
+                      <div className="run-sheet-costume-name">{c.name}</div>
+                      <div className="run-sheet-costume-meta">
+                        {c.category || "—"}
+                        {c.subcategory ? ` · ${c.subcategory}` : ""}
+                      </div>
+                      <div className="run-sheet-costume-loc">
+                        <b>Location:</b> {c.location || "—"}{c.sub_location ? ` · ${c.sub_location}` : ""}
+                      </div>
+                      {show && (
+                        <div className="run-sheet-costume-show">
+                          <b>Show:</b> {show.name}{show.year ? ` (${show.year})` : ""}
+                        </div>
+                      )}
+                      {c.in_use_note && (
+                        <div className="run-sheet-costume-notes"><b>Notes:</b> {c.in_use_note}</div>
+                      )}
+                      {c.notes && !c.in_use_note && (
+                        <div className="run-sheet-costume-notes"><b>Notes:</b> {c.notes}</div>
+                      )}
+                    </div>
+                    <div className="run-sheet-costume-check">☐</div>
+                  </div>
+                );
+              })}
+              {col.costumes.length === 0 && (
+                <div className="run-sheet-empty">No assignments</div>
+              )}
+            </div>
+
+            {student.notes && (
+              <div className="run-sheet-student-notes">
+                <div className="run-sheet-subtitle">STUDENT NOTES</div>
+                <p>{student.notes}</p>
+              </div>
+            )}
+
+            <footer className="run-sheet-footer">
+              Printed {printedAt} · Dresser signature: _______________________
+            </footer>
+          </section>
+        );
+      })}
     </div>
   );
 }

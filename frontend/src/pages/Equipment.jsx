@@ -2,11 +2,12 @@ import { useEffect, useState, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useConfirm } from "@/components/ConfirmDialog";
-import { Wrench, Plus, Search, X, ChevronDown, ChevronRight, Flag, Sparkles, Pencil, Trash2 } from "lucide-react";
+import { Wrench, Plus, Search, X, ChevronDown, ChevronRight, Flag, Sparkles, Pencil, Trash2, FileUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import EquipmentFormDialog from "@/components/EquipmentFormDialog";
+import ImportWizard from "@/components/ImportWizard";
 import { toast } from "sonner";
 
 export default function Equipment() {
@@ -22,6 +23,7 @@ export default function Equipment() {
   const [editingItem, setEditingItem] = useState(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState({});
+  const [importOpen, setImportOpen] = useState(false);
 
   const fetchAll = async () => {
     setLoading(true);
@@ -104,9 +106,19 @@ export default function Equipment() {
             Track hardware, tools, cables, mics, and other backstage gear.
           </p>
         </div>
-        <Button data-testid="add-equipment-btn" onClick={handleNew} className="bg-[#09090B] hover:bg-[#27272A] rounded-none text-white h-10">
-          <Plus className="h-4 w-4 mr-1" />Add Equipment
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button data-testid="add-equipment-btn" onClick={handleNew} className="bg-[#09090B] hover:bg-[#27272A] rounded-none text-white h-10">
+            <Plus className="h-4 w-4 mr-1" />Add Equipment
+          </Button>
+          <Button
+            data-testid="import-equipment-btn"
+            variant="outline"
+            onClick={() => setImportOpen(true)}
+            className="rounded-none h-10 border-[#E4E4E7]"
+          >
+            <FileUp className="h-4 w-4 mr-1" />Import CSV
+          </Button>
+        </div>
       </div>
 
       <div className="relative">
@@ -192,6 +204,27 @@ export default function Equipment() {
         onSaved={fetchAll}
         onCategoriesChanged={refreshCategories}
         onSortingSystemsChanged={refreshSortingSystems}
+      />
+
+      <ImportWizard
+        entity="equipment"
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onDone={() => fetchAll()}
+        sizeSystems={sortingSystems}
+        targetFields={[
+          { key: "name", label: "Name", required: true, aliases: ["title", "item"] },
+          { key: "category", label: "Category", aliases: ["cat", "type"] },
+          { key: "subcategory", label: "Subcategory", aliases: ["subcat"] },
+          { key: "location", label: "Location", aliases: ["storage", "loc", "where"] },
+          { key: "sub_location", label: "Sub-location", aliases: ["sublocation", "rack", "shelf", "bin"] },
+          { key: "notes", label: "Notes", aliases: ["note", "description", "desc"] },
+          { key: "creator", label: "Vendor / creator", aliases: ["maker", "vendor", "brand"] },
+          { key: "keywords", label: "Keywords (comma-sep)", aliases: ["tags", "keyword"] },
+          { key: "total_quantity", label: "Total quantity", aliases: ["quantity", "qty", "count", "total"] },
+          { key: "buy_link", label: "Buy link", aliases: ["url", "link", "purchase"] },
+          { key: "sorting_system", label: "Sorting system", aliases: ["sortingsystem", "system"] },
+        ]}
       />
     </div>
   );

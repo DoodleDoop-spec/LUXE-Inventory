@@ -13,6 +13,7 @@ import {
 import { toast } from "sonner";
 import { Upload, Image as ImageIcon, X, StickyNote, Flag, Plus, LinkIcon, Sparkles } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import VideoTimestampScrubber from "@/components/VideoTimestampScrubber";
 
 export default function CostumeFormDialog({
   open, onOpenChange, editing, categories, locations, sizingSystems, shows, groups, onSaved,
@@ -1021,6 +1022,12 @@ export default function CostumeFormDialog({
                           className="rounded-none border-[#E4E4E7] h-9 text-xs"
                         />
                       </div>
+                      <VideoTimestampScrubber
+                        videoUrl={showLinkEdits[entry.show_id] ?? show?.show_link ?? ""}
+                        timestamp={entry.timestamp}
+                        onTimestampChange={(ts) => updateCostumeShowTimestamp(entry.show_id, ts)}
+                        testIdPrefix={`vts-${entry.show_id}`}
+                      />
                     </div>
                   );
                 })}

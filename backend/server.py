@@ -258,6 +258,20 @@ class Costume(BaseModel):
     variant_label: str = ""
     in_use_quantity: int = 0
     assigned_student_ids: List[str] = Field(default_factory=list)
+    shortage: bool = False  # computed: in_use_quantity < len(assigned_student_ids)
+
+
+def _apply_shortage(doc: Dict) -> Dict:
+    """Compute the shortage flag on a costume doc in-place and return it."""
+    if not doc:
+        return doc
+    if doc.get("in_use"):
+        assigned = doc.get("assigned_student_ids") or []
+        qty = int(doc.get("in_use_quantity") or 0)
+        doc["shortage"] = qty < len(assigned)
+    else:
+        doc["shortage"] = False
+    return doc
 
 
 class InventoryGroup(BaseModel):
@@ -514,6 +528,8 @@ async def list_costumes(
     elif sort in (None, "origin_year_desc"):
         # newest first; nulls at end
         docs.sort(key=lambda d: (d.get("origin_year") is None, -(d.get("origin_year") or 0), d.get("name", "").lower()))
+    for d in docs:
+        _apply_shortage(d)
     return docs
 
 
@@ -522,6 +538,7 @@ async def get_costume(costume_id: str):
     doc = await db.costumes.find_one({"id": costume_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Costume not found")
+    _apply_shortage(doc)
     return doc
 
 
@@ -651,6 +668,7 @@ async def create_costume(payload: CostumeCreate):
     }
     await db.costumes.insert_one(doc)
     doc.pop("_id", None)
+    _apply_shortage(doc)
     return doc
 
 
@@ -755,6 +773,7 @@ async def update_costume(costume_id: str, payload: CostumeUpdate):
     if ("location" in updates and new_loc != old_loc) or ("sub_location" in updates and new_sub != old_sub):
         await _detach_item_from_all_maps(costume_id)
     doc = await db.costumes.find_one({"id": costume_id}, {"_id": 0})
+    _apply_shortage(doc)
     return doc
 
 
@@ -2658,6 +2677,344 @@ async def import_students(payload: StudentImportPayload, request: Request):
 
 
 # ==================== END STUDENT CATEGORIES ====================
+
+
+# ==================== COSTUME + EQUIPMENT CSV IMPORT ====================
+# Column-mapping wizard hits these endpoints after the frontend has mapped raw
+# spreadsheet columns onto the canonical fields below. Rows come in as a list
+# of already-mapped dicts; the wizard handles all column-name discovery.
+
+
+class CostumeImportRow(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    name: Optional[str] = ""
+    category: Optional[str] = ""
+    subcategory: Optional[str] = ""
+    location: Optional[str] = ""
+    sub_location: Optional[str] = ""
+    notes: Optional[str] = ""
+    creator: Optional[str] = ""
+    keywords: Optional[str] = ""          # comma-separated
+    total_quantity: Optional[str] = ""    # parsed as int when sorting_system is blank
+    origin_year: Optional[str] = ""
+    buy_link: Optional[str] = ""
+    sorting_system: Optional[str] = ""
+    sizes: Optional[Dict[str, str]] = None  # map of size-key → count
+
+
+class CostumeImportPayload(BaseModel):
+    rows: List[CostumeImportRow]
+    dry_run: Optional[bool] = False
+    create_missing_categories: Optional[bool] = True
+    create_missing_locations: Optional[bool] = True
+
+
+def _import_summary_new(preview_flag: bool) -> Dict:
+    return {"created": 0, "would_create": 0, "duplicates": 0, "invalid": 0, "preview": [] if preview_flag else []}
+
+
+async def _resolve_or_create_category(name: str, existing_names_lower: set, ensure_create: bool) -> Optional[str]:
+    """Return the canonical category name for a costume category, creating it
+    if requested. Returns None if the name is empty."""
+    n = (name or "").strip()
+    if not n:
+        return None
+    if n.lower() in existing_names_lower:
+        return n
+    if not ensure_create:
+        return n
+    now = _now_iso()
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name": n,
+        "subcategories": [],
+        "color": "#71717A",
+        "image_id": None,
+        "location": "",
+        "sub_location": "",
+        "notes": "",
+        "keywords": [],
+        "creator": "",
+        "created_at": now,
+    }
+    await db.categories.insert_one(dict(doc))
+    existing_names_lower.add(n.lower())
+    return n
+
+
+async def _resolve_or_create_location(path: str, existing_paths_lower: set, ensure_create: bool) -> Optional[str]:
+    """Return a location path, creating a flat top-level location if needed."""
+    p = (path or "").strip()
+    if not p:
+        return None
+    if p.lower() in existing_paths_lower:
+        return p
+    if not ensure_create:
+        return p
+    # Create a top-level location (no parent). Users can restructure later.
+    now = _now_iso()
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name": p,
+        "path": p,
+        "parent_id": None,
+        "depth": 0,
+        "map_mode": "none",
+        "created_at": now,
+    }
+    await db.locations.insert_one(dict(doc))
+    existing_paths_lower.add(p.lower())
+    return p
+
+
+@api_router.post("/costumes/import")
+async def import_costumes(payload: CostumeImportPayload, request: Request):
+    """Bulk-import costumes from a mapped CSV. Duplicate detection is by name
+    (case-insensitive). Missing categories and locations are auto-created unless
+    the caller opts out."""
+    now = _now_iso()
+    # Preload existing costumes to catch dupes by name
+    existing = await db.costumes.find({}, {"_id": 0, "name": 1}).to_list(10000)
+    ex_names = {(r.get("name") or "").strip().lower() for r in existing}
+    cats = await db.categories.find({}, {"_id": 0, "name": 1}).to_list(500)
+    cat_names_lower = {(c.get("name") or "").strip().lower() for c in cats}
+    locs = await db.locations.find({}, {"_id": 0, "path": 1}).to_list(2000)
+    loc_paths_lower = {(l.get("path") or "").strip().lower() for l in locs}
+
+    created, duplicates, invalid = 0, 0, 0
+    preview: List[Dict[str, str]] = []
+    for row in payload.rows:
+        name = (row.name or "").strip()
+        if not name:
+            invalid += 1
+            continue
+        key = name.lower()
+        if key in ex_names:
+            duplicates += 1
+            continue
+        category = await _resolve_or_create_category(
+            row.category or "Uncategorized", cat_names_lower, bool(payload.create_missing_categories)
+        ) or "Uncategorized"
+        location = await _resolve_or_create_location(
+            row.location or "Unfiled", loc_paths_lower, bool(payload.create_missing_locations)
+        ) or "Unfiled"
+        # Parse sizes: keep keys/vals as ints
+        sizes: Dict[str, int] = {}
+        for k, v in (row.sizes or {}).items():
+            try:
+                iv = int(str(v).strip())
+                if iv > 0:
+                    sizes[str(k).strip()] = iv
+            except (ValueError, TypeError):
+                continue
+        sorting_system = (row.sorting_system or "").strip()
+        if sorting_system:
+            total_qty = _compute_total(sizes)
+        else:
+            try:
+                total_qty = int(str(row.total_quantity or "0").strip() or 0)
+            except ValueError:
+                total_qty = 0
+        try:
+            origin_year = int(str(row.origin_year or "").strip()) if (row.origin_year and str(row.origin_year).strip()) else None
+        except ValueError:
+            origin_year = None
+        keywords = [k.strip() for k in (row.keywords or "").split(",") if k.strip()]
+        doc = {
+            "id": str(uuid.uuid4()),
+            "name": name,
+            "category": category,
+            "subcategory": (row.subcategory or "").strip(),
+            "location": location,
+            "sub_location": (row.sub_location or "").strip(),
+            "notes": (row.notes or "").strip(),
+            "note_image_ids": [],
+            "sorting_system": sorting_system,
+            "sizes": sizes,
+            "size_notes": {},
+            "keywords": keywords,
+            "creator": (row.creator or "").strip(),
+            "buy_link": (row.buy_link or "").strip(),
+            "shows": [],
+            "origin_year": origin_year,
+            "total_quantity": total_qty,
+            "image_id": None,
+            "is_flagged": False,
+            "flag_reason": "",
+            "flagged_at": None,
+            "flags": [],
+            "in_use": False,
+            "in_use_note": "",
+            "in_use_since": None,
+            "in_use_quantity": 0,
+            "assigned_student_ids": [],
+            "current_show_id": None,
+            "pinned": False,
+            "group_id": None,
+            "variant_label": "",
+            "created_at": now,
+            "updated_at": now,
+        }
+        if payload.dry_run:
+            preview.append({
+                "name": name,
+                "category": category,
+                "location": location,
+                "total_quantity": str(total_qty),
+            })
+        else:
+            await db.costumes.insert_one(doc)
+        ex_names.add(key)
+        created += 1
+    return {
+        "dry_run": bool(payload.dry_run),
+        "created": created if not payload.dry_run else 0,
+        "would_create": created if payload.dry_run else 0,
+        "duplicates": duplicates,
+        "invalid": invalid,
+        "preview": preview if payload.dry_run else [],
+    }
+
+
+class EquipmentImportRow(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    name: Optional[str] = ""
+    category: Optional[str] = ""
+    subcategory: Optional[str] = ""
+    location: Optional[str] = ""
+    sub_location: Optional[str] = ""
+    notes: Optional[str] = ""
+    creator: Optional[str] = ""
+    keywords: Optional[str] = ""
+    total_quantity: Optional[str] = ""
+    buy_link: Optional[str] = ""
+    sorting_system: Optional[str] = ""
+    sizes: Optional[Dict[str, str]] = None
+
+
+class EquipmentImportPayload(BaseModel):
+    rows: List[EquipmentImportRow]
+    dry_run: Optional[bool] = False
+    create_missing_categories: Optional[bool] = True
+    create_missing_locations: Optional[bool] = True
+
+
+async def _resolve_or_create_equipment_category(name: str, existing_names_lower: set, ensure_create: bool) -> Optional[str]:
+    n = (name or "").strip()
+    if not n:
+        return None
+    if n.lower() in existing_names_lower:
+        return n
+    if not ensure_create:
+        return n
+    now = _now_iso()
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name": n,
+        "subcategories": [],
+        "color": "#71717A",
+        "created_at": now,
+    }
+    await db.equipment_categories.insert_one(dict(doc))
+    existing_names_lower.add(n.lower())
+    return n
+
+
+@api_router.post("/equipment/import")
+async def import_equipment(payload: EquipmentImportPayload, request: Request):
+    """Bulk-import equipment from a mapped CSV. Duplicate detection by name."""
+    now = _now_iso()
+    existing = await db.equipment.find({}, {"_id": 0, "name": 1}).to_list(10000)
+    ex_names = {(r.get("name") or "").strip().lower() for r in existing}
+    cats = await db.equipment_categories.find({}, {"_id": 0, "name": 1}).to_list(500)
+    cat_names_lower = {(c.get("name") or "").strip().lower() for c in cats}
+    locs = await db.locations.find({}, {"_id": 0, "path": 1}).to_list(2000)
+    loc_paths_lower = {(l.get("path") or "").strip().lower() for l in locs}
+
+    created, duplicates, invalid = 0, 0, 0
+    preview: List[Dict[str, str]] = []
+    for row in payload.rows:
+        name = (row.name or "").strip()
+        if not name:
+            invalid += 1
+            continue
+        key = name.lower()
+        if key in ex_names:
+            duplicates += 1
+            continue
+        category = await _resolve_or_create_equipment_category(
+            row.category or "Uncategorized", cat_names_lower, bool(payload.create_missing_categories)
+        ) or "Uncategorized"
+        location = await _resolve_or_create_location(
+            row.location or "Unfiled", loc_paths_lower, bool(payload.create_missing_locations)
+        ) or "Unfiled"
+        sizes: Dict[str, int] = {}
+        for k, v in (row.sizes or {}).items():
+            try:
+                iv = int(str(v).strip())
+                if iv > 0:
+                    sizes[str(k).strip()] = iv
+            except (ValueError, TypeError):
+                continue
+        sorting_system = (row.sorting_system or "").strip()
+        if sorting_system:
+            total_qty = _compute_total(sizes)
+        else:
+            try:
+                total_qty = int(str(row.total_quantity or "0").strip() or 0)
+            except ValueError:
+                total_qty = 0
+        keywords = [k.strip() for k in (row.keywords or "").split(",") if k.strip()]
+        doc = {
+            "id": str(uuid.uuid4()),
+            "name": name,
+            "category": category,
+            "subcategory": (row.subcategory or "").strip(),
+            "location": location,
+            "sub_location": (row.sub_location or "").strip(),
+            "notes": (row.notes or "").strip(),
+            "note_image_ids": [],
+            "sorting_system": sorting_system,
+            "sizes": sizes,
+            "size_notes": {},
+            "keywords": keywords,
+            "creator": (row.creator or "").strip(),
+            "buy_link": (row.buy_link or "").strip(),
+            "total_quantity": total_qty,
+            "image_id": None,
+            "is_flagged": False,
+            "flag_reason": "",
+            "flagged_at": None,
+            "flags": [],
+            "in_use": False,
+            "in_use_note": "",
+            "in_use_since": None,
+            "pinned": False,
+            "created_at": now,
+            "updated_at": now,
+        }
+        if payload.dry_run:
+            preview.append({
+                "name": name,
+                "category": category,
+                "location": location,
+                "total_quantity": str(total_qty),
+            })
+        else:
+            await db.equipment.insert_one(doc)
+        ex_names.add(key)
+        created += 1
+    return {
+        "dry_run": bool(payload.dry_run),
+        "created": created if not payload.dry_run else 0,
+        "would_create": created if payload.dry_run else 0,
+        "duplicates": duplicates,
+        "invalid": invalid,
+        "preview": preview if payload.dry_run else [],
+    }
+
+
+# ==================== END COSTUME + EQUIPMENT CSV IMPORT ====================
 
 
 # ==================== ROLES & PERMISSIONS ====================

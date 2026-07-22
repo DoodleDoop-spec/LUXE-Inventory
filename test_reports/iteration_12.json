@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 22 (CSV import + shortage alerts + run sheet + video timestamp scrubber) — Backend + Frontend all pass. 10/10 pytest tests green covering: costume/equipment CSV import (dry_run vs real, missing-name = invalid, duplicate by name, auto-create categories + locations); shortage flag computed correctly on GET /api/costumes list, GET /api/costumes/{id}, and PUT /api/costumes/{id} across three states (not-in-use → false, in_use+qty<assigned → true, in_use+no assignments → false). Frontend Playwright confirmed: Inventory import wizard opens with 'Step 1 of 4' and closes via X; Equipment page opens the same wizard; shortage badges render on inventory cards (2 costumes, 'SHORT · 3'); Wardrobe shortage banner + chips + red-bordered tiles + wardrobe-cost-shortage badges + Print Run Sheet button (enabled, 3 students assigned); 3 run-sheet-page-{student_id} nodes present inside .wardrobe-print-only; VTS toggle button reveals YouTube player + Capture + Jump buttons in the Costume edit dialog.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration22.py",
+    "/app/test_reports/pytest/iter22_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now 4282 lines — hitting the >700-line rule hard; iteration_11 already flagged this. Import-wizard endpoints (~2686-2960) are natural candidates to move into a routers/imports.py module.",
+    "Import: category/location auto-create sets create_missing_* default True. Consider surfacing the auto-created counts in the response payload (e.g. auto_created_categories/locations) so the wizard's 'preview' step can warn the user. Currently the caller has no signal about how many new taxonomy rows were minted.",
+    "Shortage flag is computed on every read via _apply_shortage() — fine for now but if the list grows into the thousands it would be cheaper to persist it on writes (single field update) and re-derive only when in_use/quantity/assignments change.",
+    "Import endpoint counts a row as 'created' even when dry_run=true (returned under would_create). The internal counter reuse works but is easy to misread; a separate would_create counter would improve maintainability.",
+    "Costume/Equipment import endpoints trust the client-provided sizes dict shape (Dict[str, str]) — malformed values are silently skipped. Consider returning per-row warnings in preview for debuggability."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration22.py (new)"
+  ],
+  "success_rate": {
+    "backend": "10/10 iter22 tests pass (100%)",
+    "frontend": "5/5 flows pass — inventory wizard, equipment wizard, inventory shortage badges, wardrobe banner+tiles+print-btn+run-sheet DOM, VTS toggle→player/capture/jump"
+  },
+  "test_credentials": "admin@luxe.test / LuxeAdmin!23 (Director of Default Organization).",
+  "seed_data_creation": "Tests create ephemeral TEST_CIMP_/TEST_EIMP_/TEST_SHORT_/TEST_ITER22_CAT_/TEST_ITER22_LOC_ rows. No teardown — small volume, name-prefixed for future cleanup.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteration 22 fully verified. Backend pytest suite for iter22 is at /app/backend/tests/test_iteration22.py; run with `pytest /app/backend/tests/test_iteration22.py -v`. The wardrobe seed data has 2 shortage costumes (abicdu8gqe and TEST_SHORT_B_07c9a2ff) and 3 assigned students (Ava Chen, Cara Diaz, Ben Ng). VTS smoke: costume 88cce264-9c68-4a09-aac8-9420554ecec0 has a YouTube link on its E2E Test Show entry — open via /costume/{id} → Edit → the VTS toggle 'vts-{show_id}-toggle' reveals player/capture/jump. Frontend Wardrobe route needs ~3s to hydrate before the print-btn+banner render (2s wait was flaky in one run)."
+}
