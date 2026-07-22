@@ -396,33 +396,16 @@ export default function Settings() {
             </div>
             <Switch data-testid="settings-flag-banner" checked={!!settings.show_flag_banner} onCheckedChange={(v) => setSettings({ ...settings, show_flag_banner: v })} />
           </div>
-          <div className="p-5 space-y-2">
+          <div className="p-5 flex items-center justify-between">
             <div>
-              <Label className="eyebrow">CURRENTLY IN-USE VISIBILITY</Label>
-              <p className="text-xs text-[#71717A] mt-1">Control how &quot;in use&quot; costumes appear on the dashboard.</p>
+              <Label className="eyebrow">SHOW IN-USE BANNER ON DASHBOARD</Label>
+              <p className="text-xs text-[#71717A] mt-1">Show a prominent list of costumes currently on stage.</p>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2">
-              {[
-                { v: "full", label: "Show everything", desc: "Section + IN USE badges" },
-                { v: "hide_marker", label: "Hide markers only", desc: "Keep section, drop the green tags" },
-                { v: "hide_all", label: "Don't spoil the surprise!", desc: "Hide the whole section 🤫" },
-              ].map((opt) => (
-                <button
-                  key={opt.v}
-                  type="button"
-                  data-testid={`settings-in-use-mode-${opt.v}`}
-                  onClick={() => setSettings({ ...settings, hide_in_use_mode: opt.v })}
-                  className={`text-left p-3 border transition-colors ${
-                    settings.hide_in_use_mode === opt.v
-                      ? "border-[#09090B] bg-[#09090B] text-white"
-                      : "border-[#E4E4E7] bg-white text-[#09090B] hover:border-[#09090B]"
-                  }`}
-                >
-                  <div className="text-sm font-medium">{opt.label}</div>
-                  <div className={`text-[10px] font-mono-label mt-1 ${settings.hide_in_use_mode === opt.v ? "text-white/70" : "text-[#71717A]"}`}>{opt.desc}</div>
-                </button>
-              ))}
-            </div>
+            <Switch
+              data-testid="settings-in-use-banner"
+              checked={settings.hide_in_use_mode !== "hide_all"}
+              onCheckedChange={(v) => setSettings({ ...settings, hide_in_use_mode: v ? "full" : "hide_all" })}
+            />
           </div>
           <div className="p-5 flex justify-end">
             <Button data-testid="settings-save-btn" onClick={saveSettings} disabled={savingSettings} className="bg-[#09090B] hover:bg-[#27272A] text-white rounded-none h-10">

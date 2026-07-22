@@ -268,7 +268,7 @@ export default function Dashboard() {
                     </div>
                   )}
                   {showInUseMarkers && c.in_use && (
-                    <div className="absolute bottom-2 left-2 right-2 bg-[#10B981]/90 text-white text-[10px] font-mono-label tracking-widest text-center py-0.5">
+                    <div className="absolute bottom-2 left-2 right-2 bg-[#10B981] text-white text-[10px] font-mono-label tracking-widest text-center py-0.5" data-testid={`in-use-marker-${c.id}`}>
                       IN USE
                     </div>
                   )}

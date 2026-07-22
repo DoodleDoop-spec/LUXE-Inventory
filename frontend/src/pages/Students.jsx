@@ -3,7 +3,7 @@ import { api } from "@/lib/api";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { usePrompt } from "@/components/PromptDialog";
 import {
-  Users, Plus, Search, Upload, Mail, MailCheck, X, Trash2, Pencil, User as UserIcon,
+  Users, Plus, Search, Upload, Mail, MailCheck, X, Trash2, Pencil, User as UserIcon, Palette, Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,9 +24,15 @@ const emptyForm = {
   pronouns: "",
   notes: "",
   image_id: null,
+  category_id: "",
   measurements: {},
   sizes: {},
 };
+
+const CATEGORY_PALETTE = [
+  "#EC4899", "#8B5CF6", "#3B82F6", "#10B981", "#F59E0B",
+  "#EF4444", "#06B6D4", "#84CC16", "#F97316", "#6366F1",
+];
 
 export default function Students() {
   const confirm = useConfirm();
@@ -42,19 +48,23 @@ export default function Students() {
   const [uploading, setUploading] = useState(false);
   const [inviteBusy, setInviteBusy] = useState(false);
   const [sortingSystems, setSortingSystems] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [catManagerOpen, setCatManagerOpen] = useState(false);
 
   const load = async () => {
     try {
-      const [ls, cf, st, ss] = await Promise.all([
+      const [ls, cf, st, ss, cats] = await Promise.all([
         api.get("/students"),
         api.get("/students/config"),
         api.get("/students/stats"),
         api.get("/sizing-systems"),
+        api.get("/student-categories"),
       ]);
       setStudents(ls.data);
       setConfig(cf.data);
       setStats(st.data);
       setSortingSystems(ss.data);
+      setCategories(cats.data);
     } catch {
       toast.error("Failed to load students");
     }
@@ -97,6 +107,7 @@ export default function Students() {
       pronouns: s.pronouns || "",
       notes: s.notes || "",
       image_id: s.image_id || null,
+      category_id: s.category_id || "",
       measurements,
       sizes,
     });
@@ -165,6 +176,7 @@ export default function Students() {
         pronouns: form.pronouns.trim(),
         notes: form.notes.trim(),
         image_id: form.image_id,
+        category_id: form.category_id || null,
         measurements: form.measurements,
         sizes: form.sizes,
       };
@@ -246,6 +258,14 @@ export default function Students() {
               className="pl-10 h-11 rounded-none border-[#E4E4E7] w-64"
             />
           </div>
+          <Button
+            onClick={() => setCatManagerOpen(true)}
+            variant="outline"
+            data-testid="students-categories-btn"
+            className="rounded-none h-11 px-4 border-[#E4E4E7]"
+          >
+            <Palette className="h-4 w-4 mr-1" /> Categories
+          </Button>
           <Button onClick={openNew} data-testid="students-new-btn" className="bg-[#09090B] hover:bg-[#27272A] text-white rounded-none h-11 px-5">
             <Plus className="h-4 w-4 mr-1" /> Add student
           </Button>
@@ -310,6 +330,7 @@ export default function Students() {
             <StudentCard
               key={s.id}
               student={s}
+              category={categories.find((c) => c.id === s.category_id)}
               onEdit={() => openEdit(s)}
               onDelete={() => removeStudent(s)}
               onInvite={() => sendInvite(s)}
@@ -390,6 +411,29 @@ export default function Students() {
                 <div>
                   <Label className="eyebrow">PRONOUNS</Label>
                   <Input data-testid="student-pronouns" value={form.pronouns} onChange={(e) => setForm({ ...form, pronouns: e.target.value })} placeholder="e.g. she/her" className="rounded-none border-[#E4E4E7] h-10 mt-1" />
+                </div>
+                <div className="md:col-span-2">
+                  <Label className="eyebrow">SORTING CATEGORY (E.G. VOICE PART)</Label>
+                  <div className="flex items-center gap-2 mt-1">
+                    <select
+                      data-testid="student-category"
+                      value={form.category_id}
+                      onChange={(e) => setForm({ ...form, category_id: e.target.value })}
+                      className="flex-1 h-10 border border-[#E4E4E7] rounded-none px-2 text-sm bg-white"
+                    >
+                      <option value="">— None —</option>
+                      {categories.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                    {form.category_id && (
+                      <span
+                        className="w-6 h-6 rounded-full border border-[#09090B]"
+                        style={{ backgroundColor: (categories.find((c) => c.id === form.category_id) || {}).color || "#71717A" }}
+                        title={(categories.find((c) => c.id === form.category_id) || {}).name}
+                      />
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -528,6 +572,14 @@ export default function Students() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Category manager dialog */}
+      <CategoryManager
+        open={catManagerOpen}
+        onOpenChange={setCatManagerOpen}
+        categories={categories}
+        onChanged={load}
+      />
     </div>
   );
 }
@@ -545,10 +597,20 @@ function Stat({ label, value, testId }) {
   );
 }
 
-function StudentCard({ student, onEdit, onDelete, onInvite }) {
+function StudentCard({ student, category, onEdit, onDelete, onInvite }) {
   const s = student;
   return (
     <div className="bg-white p-4 hover:bg-[#FAFAFA] transition-colors group relative" data-testid={`student-card-${s.id}`}>
+      {category && (
+        <div
+          className="absolute top-2 left-2 text-white text-[10px] font-mono-label tracking-widest px-1.5 py-0.5 z-10"
+          style={{ backgroundColor: category.color }}
+          data-testid={`student-category-badge-${s.id}`}
+          title={category.name}
+        >
+          {category.name.toUpperCase()}
+        </div>
+      )}
       <button
         type="button"
         onClick={onEdit}
@@ -602,5 +664,131 @@ function StudentCard({ student, onEdit, onDelete, onInvite }) {
         </div>
       )}
     </div>
+  );
+}
+
+
+function CategoryManager({ open, onOpenChange, categories, onChanged }) {
+  const [name, setName] = useState("");
+  const [color, setColor] = useState(CATEGORY_PALETTE[0]);
+  const [editing, setEditing] = useState(null); // id
+  const [busy, setBusy] = useState(false);
+
+  const reset = () => { setName(""); setColor(CATEGORY_PALETTE[0]); setEditing(null); };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    const clean = name.trim();
+    if (!clean) return;
+    setBusy(true);
+    try {
+      if (editing) {
+        await api.put(`/student-categories/${editing}`, { name: clean, color });
+        toast.success("Category updated");
+      } else {
+        await api.post("/student-categories", { name: clean, color });
+        toast.success("Category added");
+      }
+      reset();
+      onChanged?.();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed");
+    }
+    setBusy(false);
+  };
+
+  const startEdit = (c) => { setEditing(c.id); setName(c.name); setColor(c.color); };
+
+  const remove = async (c) => {
+    if (!window.confirm(`Delete category "${c.name}"? All students tagged with it will be un-tagged.`)) return;
+    try {
+      await api.delete(`/student-categories/${c.id}`);
+      toast.success("Category deleted");
+      onChanged?.();
+    } catch { toast.error("Failed to delete"); }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) reset(); onOpenChange(v); }}>
+      <DialogContent className="max-w-md w-[calc(100vw-2rem)] rounded-none border-[#09090B]" data-testid="student-categories-dialog">
+        <DialogHeader>
+          <div className="eyebrow flex items-center gap-2"><Palette className="h-3 w-3" /> STUDENTS / SORTING</div>
+          <DialogTitle className="font-display text-2xl tracking-tight">Student categories</DialogTitle>
+          <DialogDescription>
+            Group students by voice part, section, or any classification. Each gets a colored badge on their card.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={submit} className="space-y-3 mt-2">
+          <div>
+            <Label className="eyebrow">NAME</Label>
+            <Input
+              data-testid="cat-name"
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Soprano, Tenor, JV"
+              className="rounded-none border-[#E4E4E7] h-10 mt-1"
+            />
+          </div>
+          <div>
+            <Label className="eyebrow">COLOR</Label>
+            <div className="flex flex-wrap gap-1.5 mt-1">
+              {CATEGORY_PALETTE.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setColor(c)}
+                  data-testid={`cat-color-${c.replace("#", "")}`}
+                  className={`w-7 h-7 rounded-full border-2 ${color === c ? "border-[#09090B]" : "border-transparent"} flex items-center justify-center`}
+                  style={{ backgroundColor: c }}
+                  aria-label={`Color ${c}`}
+                >
+                  {color === c && <Check className="h-3 w-3 text-white" strokeWidth={3} />}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            {editing && (
+              <Button type="button" variant="outline" onClick={reset} className="rounded-none h-10">Cancel</Button>
+            )}
+            <Button type="submit" disabled={busy} data-testid="cat-save" className="bg-[#09090B] hover:bg-[#27272A] text-white rounded-none h-10 px-5">
+              {busy ? "Saving…" : (editing ? "Save" : <><Plus className="h-4 w-4 mr-1" /> Add category</>)}
+            </Button>
+          </div>
+        </form>
+        {categories.length > 0 && (
+          <div className="mt-3 border-t border-[#E4E4E7] pt-3">
+            <div className="eyebrow mb-2">EXISTING</div>
+            <ul className="divide-y divide-[#F4F4F5] border border-[#E4E4E7] max-h-64 overflow-y-auto">
+              {categories.map((c) => (
+                <li key={c.id} className="flex items-center gap-2 px-3 py-2" data-testid={`cat-row-${c.id}`}>
+                  <span className="w-4 h-4 rounded-full shrink-0" style={{ backgroundColor: c.color }} />
+                  <span className="flex-1 text-sm text-[#09090B] truncate">{c.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => startEdit(c)}
+                    className="p-1.5 border border-[#E4E4E7] hover:border-[#09090B]"
+                    data-testid={`cat-edit-${c.id}`}
+                    title="Edit"
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => remove(c)}
+                    className="p-1.5 border border-[#E4E4E7] hover:border-[#EF4444] hover:text-[#EF4444]"
+                    data-testid={`cat-delete-${c.id}`}
+                    title="Delete"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }

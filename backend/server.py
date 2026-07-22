@@ -2271,6 +2271,7 @@ class Student(BaseModel):
     grade: Optional[str] = ""
     pronouns: Optional[str] = ""
     notes: Optional[str] = ""
+    category_id: Optional[str] = None
     measurements: Dict[str, str] = {}
     sizes: Dict[str, str] = {}
     invited: bool = False
@@ -2290,6 +2291,7 @@ class StudentPayload(BaseModel):
     grade: Optional[str] = ""
     pronouns: Optional[str] = ""
     notes: Optional[str] = ""
+    category_id: Optional[str] = None
     measurements: Optional[Dict[str, str]] = None
     sizes: Optional[Dict[str, str]] = None
 
@@ -2304,6 +2306,7 @@ class StudentUpdate(BaseModel):
     grade: Optional[str] = None
     pronouns: Optional[str] = None
     notes: Optional[str] = None
+    category_id: Optional[str] = None
     measurements: Optional[Dict[str, str]] = None
     sizes: Optional[Dict[str, str]] = None
 
@@ -2409,6 +2412,7 @@ async def create_student(payload: StudentPayload):
         "grade": (payload.grade or "").strip(),
         "pronouns": (payload.pronouns or "").strip(),
         "notes": (payload.notes or "").strip(),
+        "category_id": payload.category_id or None,
         "measurements": _clean_dict_str(payload.measurements),
         "sizes": _clean_dict_str(payload.sizes),
         "invited": False,
@@ -2434,6 +2438,8 @@ async def update_student(student_id: str, payload: StudentUpdate):
             if key == "email":
                 val = val.lower()
             updates[key] = val
+    if "category_id" in updates and not updates["category_id"]:
+        updates["category_id"] = None
     if "first_name" in updates and not updates["first_name"]:
         raise HTTPException(status_code=400, detail="First name required")
     if "measurements" in updates:
@@ -2472,6 +2478,104 @@ async def invite_student(student_id: str):
     )
     return {"ok": True, "email": email, "queued": True, "sent": False,
             "message": "Invite queued. Email delivery will activate when authentication is enabled."}
+
+
+# ==================== STUDENT CATEGORIES ====================
+# Colored tags that classify students (e.g. voice parts T/B/S/A, dance groups
+# JR/SR, etc.). Each student can be tagged with at most one category.
+
+
+class StudentCategory(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    name: str
+    color: str = "#3B82F6"
+    description: Optional[str] = ""
+    org_id: Optional[str] = None
+    created_at: str
+    updated_at: Optional[str] = None
+
+
+class StudentCategoryPayload(BaseModel):
+    name: str
+    color: Optional[str] = "#3B82F6"
+    description: Optional[str] = ""
+
+
+@api_router.get("/student-categories", response_model=List[StudentCategory])
+async def list_student_categories(request: Request):
+    org_id = None
+    uid = getattr(request.state, "session_user_id", None)
+    if uid:
+        u = await db.users.find_one({"user_id": uid}, {"_id": 0, "org_id": 1})
+        if u:
+            org_id = u.get("org_id")
+    q: Dict[str, object] = {}
+    if org_id:
+        q = {"$or": [{"org_id": org_id}, {"org_id": {"$exists": False}}, {"org_id": None}]}
+    docs = await db.student_categories.find(q, {"_id": 0}).to_list(500)
+    docs.sort(key=lambda d: (d.get("name") or "").lower())
+    return docs
+
+
+@api_router.post("/student-categories", response_model=StudentCategory)
+async def create_student_category(payload: StudentCategoryPayload, request: Request):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name required")
+    org_id = None
+    uid = getattr(request.state, "session_user_id", None)
+    if uid:
+        u = await db.users.find_one({"user_id": uid}, {"_id": 0, "org_id": 1})
+        if u:
+            org_id = u.get("org_id")
+    dupe = await db.student_categories.find_one({"name": name, "org_id": org_id})
+    if dupe:
+        raise HTTPException(status_code=409, detail="A student category with that name already exists")
+    now = _now_iso()
+    doc = {
+        "id": str(uuid.uuid4()),
+        "name": name,
+        "color": payload.color or "#3B82F6",
+        "description": (payload.description or "").strip(),
+        "org_id": org_id,
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db.student_categories.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@api_router.put("/student-categories/{cat_id}", response_model=StudentCategory)
+async def update_student_category(cat_id: str, payload: StudentCategoryPayload):
+    doc = await db.student_categories.find_one({"id": cat_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Not found")
+    updates = {
+        "name": payload.name.strip(),
+        "color": payload.color or "#3B82F6",
+        "description": (payload.description or "").strip(),
+        "updated_at": _now_iso(),
+    }
+    if not updates["name"]:
+        raise HTTPException(status_code=400, detail="Name required")
+    await db.student_categories.update_one({"id": cat_id}, {"$set": updates})
+    return await db.student_categories.find_one({"id": cat_id}, {"_id": 0})
+
+
+@api_router.delete("/student-categories/{cat_id}")
+async def delete_student_category(cat_id: str):
+    doc = await db.student_categories.find_one({"id": cat_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Not found")
+    await db.student_categories.delete_one({"id": cat_id})
+    # Un-tag every student that used this category
+    await db.students.update_many({"category_id": cat_id}, {"$unset": {"category_id": ""}})
+    return {"ok": True}
+
+
+# ==================== END STUDENT CATEGORIES ====================
 
 
 # ==================== ROLES & PERMISSIONS ====================
@@ -2720,6 +2824,17 @@ async def permissions_catalog():
 @api_router.get("/roles", response_model=List[Role])
 async def list_roles(request: Request):
     await _seed_roles_if_empty()
+    # If unowned roles exist alongside a Default Org, migrate them so cross-org
+    # isolation stays intact and lookups like {"org_id":X,"slug":"director"} keep
+    # returning the expected role.
+    unowned_count = await db.roles.count_documents({"$or": [{"org_id": {"$exists": False}}, {"org_id": None}]})
+    if unowned_count > 0:
+        default_org = await db.organizations.find_one({"is_default": True}, {"_id": 0})
+        if default_org:
+            await db.roles.update_many(
+                {"$or": [{"org_id": {"$exists": False}}, {"org_id": None}]},
+                {"$set": {"org_id": default_org["id"]}},
+            )
     # Resolve user by session token (middleware already validated it).
     user_id = getattr(request.state, "session_user_id", None)
     org_id = None
@@ -3357,6 +3472,61 @@ async def remove_member(user_id: str, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="User not found in your organization")
     await db.users.update_one({"user_id": user_id}, {"$set": {"org_id": None, "role_id": None, "role_slug": None}})
     return {"ok": True}
+
+
+class TransferDirectorPayload(BaseModel):
+    new_director_user_id: str
+    step_down_to_role_id: Optional[str] = None  # role to demote current Director to; default = Assistant Director
+
+
+@api_router.post("/organizations/transfer-director")
+async def transfer_director(payload: TransferDirectorPayload, user: dict = Depends(get_current_user)):
+    """Promote another member to Director and step down the caller.
+
+    The caller keeps their access under a downgraded role (default: Assistant
+    Director) and only one person holds the Director slot at any time.
+    """
+    if user["user_id"] == payload.new_director_user_id:
+        raise HTTPException(status_code=400, detail="Pick a different member")
+    org_id = user.get("org_id")
+    if not org_id:
+        raise HTTPException(status_code=404, detail="No organization")
+    # Caller must currently be a Director (or super-admin) to hand off
+    caller_role = await db.roles.find_one({"id": user.get("role_id")}, {"_id": 0})
+    if not user.get("is_superadmin") and (not caller_role or caller_role.get("slug") != "director"):
+        raise HTTPException(status_code=403, detail="Only the current Director can transfer this role")
+    target = await db.users.find_one({"user_id": payload.new_director_user_id, "org_id": org_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="Target user not found in your organization")
+    director_role = await db.roles.find_one({"org_id": org_id, "slug": "director"}, {"_id": 0})
+    if not director_role:
+        raise HTTPException(status_code=500, detail="Director role missing in this organization")
+    # Choose the caller's new role (Assistant Director if not provided, else fall back to Costumes Manager)
+    stepdown = None
+    if payload.step_down_to_role_id:
+        stepdown = await db.roles.find_one({"id": payload.step_down_to_role_id, "org_id": org_id}, {"_id": 0})
+    if not stepdown:
+        stepdown = await db.roles.find_one({"org_id": org_id, "slug": "assistant_director"}, {"_id": 0})
+    if not stepdown:
+        stepdown = await db.roles.find_one({"org_id": org_id, "slug": "costumes_manager"}, {"_id": 0})
+    if not stepdown:
+        raise HTTPException(status_code=500, detail="No fallback role available for step-down")
+    now = _now_iso()
+    # Promote target
+    await db.users.update_one(
+        {"user_id": target["user_id"]},
+        {"$set": {"role_id": director_role["id"], "role_slug": "director", "updated_at": now}},
+    )
+    # Step down caller
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"role_id": stepdown["id"], "role_slug": stepdown.get("slug"), "is_superadmin": False, "updated_at": now}},
+    )
+    return {
+        "ok": True,
+        "new_director": {"user_id": target["user_id"], "email": target.get("email"), "name": target.get("name")},
+        "stepped_down_to": {"id": stepdown["id"], "name": stepdown.get("name"), "slug": stepdown.get("slug")},
+    }
 
 
 # --- Invites ---

@@ -3,7 +3,7 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { useConfirm } from "@/components/ConfirmDialog";
 import {
-  Building2, UserPlus, Copy, Check, Trash2, RefreshCw, Users as UsersIcon, Mail, Loader2,
+  Building2, UserPlus, Copy, Check, Trash2, RefreshCw, Users as UsersIcon, Mail, Loader2, Crown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,12 @@ export default function OrgSettings() {
   const [form, setForm] = useState({ email: "", role_id: "", expires_days: 14 });
   const [busy, setBusy] = useState(false);
   const [copiedCode, setCopiedCode] = useState(null);
+  const [handoffTarget, setHandoffTarget] = useState(null); // user_id to promote
+
+  const isMeDirector = useMemo(() => {
+    const me = members.find((m) => m.user_id === user?.user_id);
+    return me?.role_slug === "director" || me?.is_superadmin;
+  }, [members, user]);
 
   const load = async () => {
     setLoading(true);
@@ -114,6 +120,25 @@ export default function OrgSettings() {
     } catch (err) { toast.error(err.response?.data?.detail || "Failed"); }
   };
 
+  const transferDirector = async (m) => {
+    const ok = await confirm({
+      title: `Transfer Director to ${m.name || m.email}?`,
+      description: "They'll become the Director. You'll step down to Assistant Director and keep your access, but you won't be able to change roles or remove users anymore.",
+      confirmLabel: "Transfer & step down",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const r = await api.post("/organizations/transfer-director", { new_director_user_id: m.user_id });
+      toast.success(`Director transferred to ${r.data.new_director?.name || m.email}`);
+      load();
+      // Refresh caller's own /me so their UI stops showing Director-only tabs
+      window.location.reload();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Failed to transfer");
+    }
+  };
+
   const copyLink = (code) => {
     const link = `${window.location.origin}/onboarding?invite=${code}`;
     navigator.clipboard.writeText(link).then(() => {
@@ -179,6 +204,17 @@ export default function OrgSettings() {
                       <option key={r.id} value={r.id}>{r.name}</option>
                     ))}
                   </select>
+                  {isMeDirector && m.user_id !== user?.user_id && m.role_slug !== "director" && (
+                    <button
+                      type="button"
+                      onClick={() => transferDirector(m)}
+                      className="p-1.5 border border-[#E4E4E7] hover:border-[#DC2626] hover:text-[#DC2626]"
+                      title="Transfer Director role to this member"
+                      data-testid={`member-transfer-${m.user_id}`}
+                    >
+                      <Crown className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => removeMember(m)}
