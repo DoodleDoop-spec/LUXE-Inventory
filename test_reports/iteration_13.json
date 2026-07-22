@@ -1,0 +1,25 @@
+{
+  "summary": "Iteration 23 (Import History + Undo + Permission-gated UI + Show Manifest PDF) — Backend 5/5 pytest green; frontend flows all pass. Backend: GET /api/imports returns newest-first batch rows with all required fields ({id, entity, user_email, created_count, created_ids, duplicates, invalid, undone, created_at}); POST /api/costumes/import with dry_run=true does NOT record a batch, dry_run=false records entity='costumes' batch; POST /api/equipment/import records entity='equipment' batch; POST /api/imports/{id}/undo deletes created_ids from correct collection, sets undone=true + undone_count, returns {undone:true, deleted:n}; second undo → 409; unknown id → 404. Frontend: admin sees import-costumes-btn + import-history-btn on /inventory, import-equipment-btn + import-equipment-history-btn on /equipment (header shows 'IMPORT HISTORY · EQUIPMENT', filter working — only equipment rows shown); wardrobe-print-btn visible on /wardrobe; on E2E Test Show detail page show-print-manifest-btn present, show-manifest-sheet DOM present with exactly 2 manifest-row-* rows matching the 2 attached costumes; UI import → undo flow removes the created costumes from inventory list on close (verified TEST_ITER23_UI_C1 gone).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration23.py",
+    "/app/test_reports/pytest/iter23_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py continues to grow (>4300 lines) — imports + import-history endpoints (~L2771-3102) are self-contained and would be a clean split into routers/imports.py.",
+    "GET /api/imports has no auth/org scoping — every logged-in user sees all batches across all orgs. Consider filtering by request user's org_id and/or restricting to users with imports.view (or admin).",
+    "POST /api/imports/{id}/undo also lacks permission gating and org scoping — a member of one org could undo another org's batch if they knew the id. Add role-based check consistent with other write endpoints.",
+    "Undo detaches items from maps via _detach_item_from_all_maps but this happens BEFORE the delete_many; if delete_many partially fails the maps are already mutated. Consider wrapping in a session/transaction or delete first, then detach.",
+    "ImportHistoryDialog polls only on open; if two admins are working in parallel the second admin's history view can go stale. A lightweight WS/SSE push (or 10s polling) would improve UX."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration23.py"],
+  "success_rate": {"backend": "5/5 iter23 tests pass (100%)", "frontend": "6/6 flows pass"},
+  "test_credentials": "admin@luxe.test / LuxeAdmin!23 (Director + super-admin, Default Organization).",
+  "seed_data_creation": "Backend pytest creates TEST_ITER23_C_ONE/TWO + TEST_ITER23_E_ONE — all undone by the same tests. UI run seeded TEST_ITER23_UI_C1/C2/E1 via API; C1/C2 undone via UI, one equipment batch undone via UI, one equipment batch remains created (TEST_ITER23_UI_E1 still in equipment collection, TEST_ITER23_UIE category auto-created). Not cleaned up automatically — prefix-based cleanup available if needed.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteration 23 fully verified. Backend pytest: /app/backend/tests/test_iteration23.py (5 tests, ~2s). Selectors of note: batch rows in ImportHistoryDialog use data-testid=`import-batch-{id}` (NOT `import-history-row-{id}`); header eyebrow shows 'IMPORT HISTORY · EQUIPMENT' when entityFilter='equipment'. E2E Test Show id: 2cf7201e-4bda-46ef-8bae-373b06594053, has 2 attached costumes (abicdu8gqe + Pinned Hat). Note the 4×401 console errors during initial login page load are pre-existing (auth/me before session) and not blocking.",
+  "rca of the issue": "No bugs found."
+}

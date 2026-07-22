@@ -4,9 +4,11 @@ import { api } from "@/lib/api";
 import { User as UserIcon, Shirt, Filter, Users as UsersIcon, Film, Sparkles, AlertTriangle, Printer, MapPin as MapPinIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
 
 export default function Wardrobe() {
+  const { hasPerm } = useAuth();
   const [students, setStudents] = useState([]);
   const [costumes, setCostumes] = useState([]);
   const [shows, setShows] = useState([]);
@@ -139,7 +141,7 @@ export default function Wardrobe() {
             data-testid="wardrobe-print-btn"
             onClick={handlePrint}
             disabled={columns.columns.length === 0}
-            className="bg-[#09090B] hover:bg-[#27272A] rounded-none text-white h-11"
+            className={`bg-[#09090B] hover:bg-[#27272A] rounded-none text-white h-11 ${hasPerm("students.view") ? "" : "hidden"}`}
           >
             <Printer className="h-4 w-4 mr-1" /> Print Run Sheet
           </Button>

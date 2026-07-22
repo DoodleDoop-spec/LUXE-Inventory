@@ -166,3 +166,39 @@ code {
 .wardrobe-print-only .run-sheet-student-notes p { font-size: 12px; color: #27272A; }
 .wardrobe-print-only .run-sheet-empty { font-size: 12px; color: #A1A1AA; font-style: italic; }
 .wardrobe-print-only .run-sheet-footer { font-size: 10px; color: #71717A; border-top: 1px solid #E4E4E7; padding-top: 6px; margin-top: 20px; }
+
+/* ==================== Show Manifest — Print CSS ==================== */
+.show-manifest-only { display: none; }
+
+@media print {
+  html.printing-manifest body * { visibility: hidden !important; }
+  html.printing-manifest .show-manifest-only,
+  html.printing-manifest .show-manifest-only * { visibility: visible !important; }
+  html.printing-manifest .show-manifest-only {
+    display: block !important;
+    position: absolute !important;
+    top: 0; left: 0; right: 0;
+    background: #fff;
+    color: #09090B;
+  }
+}
+
+.show-manifest-only { color: #09090B; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
+.show-manifest-only .show-manifest-header { border-bottom: 2px solid #09090B; padding-bottom: 12px; margin-bottom: 16px; }
+.show-manifest-only .show-manifest-eyebrow { font-size: 10px; letter-spacing: 0.2em; color: #71717A; text-transform: uppercase; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.show-manifest-only .show-manifest-title { font-size: 32px; font-weight: 700; letter-spacing: -0.02em; margin: 4px 0 6px; }
+.show-manifest-only .show-manifest-meta { display: flex; gap: 14px; font-size: 12px; color: #52525B; font-family: ui-monospace, monospace; letter-spacing: 0.05em; }
+.show-manifest-only .show-manifest-print-at { margin-left: auto; }
+.show-manifest-only .show-manifest-notes { font-size: 12px; color: #27272A; margin-top: 8px; }
+.show-manifest-only .show-manifest-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.show-manifest-only .show-manifest-table thead th { text-align: left; font-family: ui-monospace, monospace; font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase; color: #71717A; padding: 8px 6px; border-bottom: 1px solid #09090B; }
+.show-manifest-only .show-manifest-table td { padding: 8px 6px; border-bottom: 1px solid #E4E4E7; vertical-align: top; }
+.show-manifest-only .show-manifest-table tr { page-break-inside: avoid; }
+.show-manifest-only .col-img { width: 48px; }
+.show-manifest-only .col-img img { width: 42px; height: 52px; object-fit: cover; border: 1px solid #E4E4E7; }
+.show-manifest-only .col-qty { width: 32px; text-align: right; font-variant-numeric: tabular-nums; }
+.show-manifest-only .col-check { width: 22px; text-align: center; font-size: 16px; }
+.show-manifest-only .manifest-name { font-weight: 600; font-size: 13px; }
+.show-manifest-only .manifest-orig { font-size: 8px; letter-spacing: 0.2em; color: #10B981; margin-top: 2px; font-family: ui-monospace, monospace; }
+.show-manifest-only .manifest-sub { font-size: 10px; color: #71717A; margin-top: 2px; }
+.show-manifest-only .manifest-subloc { font-size: 10px; color: #71717A; }

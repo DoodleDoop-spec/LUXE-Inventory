@@ -8,6 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import EquipmentFormDialog from "@/components/EquipmentFormDialog";
 import ImportWizard from "@/components/ImportWizard";
+import ImportHistoryDialog from "@/components/ImportHistoryDialog";
+import { useAuth } from "@/context/AuthContext";
+import { History } from "lucide-react";
 import { toast } from "sonner";
 
 export default function Equipment() {
@@ -24,6 +27,8 @@ export default function Equipment() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState({});
   const [importOpen, setImportOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const { hasPerm } = useAuth();
 
   const fetchAll = async () => {
     setLoading(true);
@@ -110,14 +115,27 @@ export default function Equipment() {
           <Button data-testid="add-equipment-btn" onClick={handleNew} className="bg-[#09090B] hover:bg-[#27272A] rounded-none text-white h-10">
             <Plus className="h-4 w-4 mr-1" />Add Equipment
           </Button>
-          <Button
-            data-testid="import-equipment-btn"
-            variant="outline"
-            onClick={() => setImportOpen(true)}
-            className="rounded-none h-10 border-[#E4E4E7]"
-          >
-            <FileUp className="h-4 w-4 mr-1" />Import CSV
-          </Button>
+          {hasPerm("equipment.create") && (
+            <>
+              <Button
+                data-testid="import-equipment-btn"
+                variant="outline"
+                onClick={() => setImportOpen(true)}
+                className="rounded-none h-10 border-[#E4E4E7]"
+              >
+                <FileUp className="h-4 w-4 mr-1" />Import CSV
+              </Button>
+              <Button
+                data-testid="import-equipment-history-btn"
+                variant="outline"
+                onClick={() => setHistoryOpen(true)}
+                className="rounded-none h-10 border-[#E4E4E7]"
+                title="Import history"
+              >
+                <History className="h-4 w-4" />
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -225,6 +243,13 @@ export default function Equipment() {
           { key: "buy_link", label: "Buy link", aliases: ["url", "link", "purchase"] },
           { key: "sorting_system", label: "Sorting system", aliases: ["sortingsystem", "system"] },
         ]}
+      />
+
+      <ImportHistoryDialog
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        entityFilter="equipment"
+        onChanged={() => fetchAll()}
       />
     </div>
   );

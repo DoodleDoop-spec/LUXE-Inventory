@@ -13,6 +13,9 @@ import {
 import { Badge } from "@/components/ui/badge";
 import CostumeFormDialog from "@/components/CostumeFormDialog";
 import ImportWizard from "@/components/ImportWizard";
+import ImportHistoryDialog from "@/components/ImportHistoryDialog";
+import { useAuth } from "@/context/AuthContext";
+import { History } from "lucide-react";
 import { toast } from "sonner";
 
 const ALL = "__all__";
@@ -70,6 +73,8 @@ export default function Inventory() {
   const [dragging, setDragging] = useState(null); // costume being dragged
   const [dragOverTarget, setDragOverTarget] = useState(null); // "cat:<name>" or "loc:<path>"
   const [importOpen, setImportOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const { hasPerm } = useAuth();
 
   useEffect(() => {
     (async () => {
@@ -253,14 +258,27 @@ export default function Inventory() {
           <Button data-testid="add-costume-btn" onClick={handleNew} className="bg-[#09090B] hover:bg-[#27272A] rounded-none text-white h-10">
             <Plus className="h-4 w-4 mr-1" />Add Costume
           </Button>
-          <Button
-            data-testid="import-costumes-btn"
-            variant="outline"
-            onClick={() => setImportOpen(true)}
-            className="rounded-none h-10 border-[#E4E4E7]"
-          >
-            <FileUp className="h-4 w-4 mr-1" />Import CSV
-          </Button>
+          {hasPerm("costumes.create") && (
+            <>
+              <Button
+                data-testid="import-costumes-btn"
+                variant="outline"
+                onClick={() => setImportOpen(true)}
+                className="rounded-none h-10 border-[#E4E4E7]"
+              >
+                <FileUp className="h-4 w-4 mr-1" />Import CSV
+              </Button>
+              <Button
+                data-testid="import-history-btn"
+                variant="outline"
+                onClick={() => setHistoryOpen(true)}
+                className="rounded-none h-10 border-[#E4E4E7]"
+                title="Import history"
+              >
+                <History className="h-4 w-4" />
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -637,6 +655,13 @@ export default function Inventory() {
           { key: "buy_link", label: "Buy link", aliases: ["url", "link", "purchase"] },
           { key: "sorting_system", label: "Sorting system", aliases: ["sizingsystem", "sortingsystem", "system"] },
         ]}
+      />
+
+      <ImportHistoryDialog
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        entityFilter="costumes"
+        onChanged={() => fetchAll()}
       />
     </div>
   );

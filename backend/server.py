@@ -2782,6 +2782,7 @@ async def import_costumes(payload: CostumeImportPayload, request: Request):
     loc_paths_lower = {(l.get("path") or "").strip().lower() for l in locs}
 
     created, duplicates, invalid = 0, 0, 0
+    created_ids: List[str] = []
     preview: List[Dict[str, str]] = []
     for row in payload.rows:
         name = (row.name or "").strip()
@@ -2864,8 +2865,26 @@ async def import_costumes(payload: CostumeImportPayload, request: Request):
             })
         else:
             await db.costumes.insert_one(doc)
+            created_ids.append(doc["id"])
         ex_names.add(key)
         created += 1
+    # Log the batch so it can be undone later
+    if not payload.dry_run and created > 0:
+        user_id = getattr(request.state, "session_user_id", None)
+        user = await db.users.find_one({"user_id": user_id}, {"_id": 0}) if user_id else None
+        await db.import_batches.insert_one({
+            "id": str(uuid.uuid4()),
+            "entity": "costumes",
+            "user_id": user_id,
+            "user_email": (user or {}).get("email", ""),
+            "created_count": created,
+            "created_ids": created_ids,
+            "duplicates": duplicates,
+            "invalid": invalid,
+            "undone": False,
+            "undone_at": None,
+            "created_at": now,
+        })
     return {
         "dry_run": bool(payload.dry_run),
         "created": created if not payload.dry_run else 0,
@@ -2932,6 +2951,7 @@ async def import_equipment(payload: EquipmentImportPayload, request: Request):
     loc_paths_lower = {(l.get("path") or "").strip().lower() for l in locs}
 
     created, duplicates, invalid = 0, 0, 0
+    created_ids: List[str] = []
     preview: List[Dict[str, str]] = []
     for row in payload.rows:
         name = (row.name or "").strip()
@@ -3002,8 +3022,25 @@ async def import_equipment(payload: EquipmentImportPayload, request: Request):
             })
         else:
             await db.equipment.insert_one(doc)
+            created_ids.append(doc["id"])
         ex_names.add(key)
         created += 1
+    if not payload.dry_run and created > 0:
+        user_id = getattr(request.state, "session_user_id", None)
+        user = await db.users.find_one({"user_id": user_id}, {"_id": 0}) if user_id else None
+        await db.import_batches.insert_one({
+            "id": str(uuid.uuid4()),
+            "entity": "equipment",
+            "user_id": user_id,
+            "user_email": (user or {}).get("email", ""),
+            "created_count": created,
+            "created_ids": created_ids,
+            "duplicates": duplicates,
+            "invalid": invalid,
+            "undone": False,
+            "undone_at": None,
+            "created_at": now,
+        })
     return {
         "dry_run": bool(payload.dry_run),
         "created": created if not payload.dry_run else 0,
@@ -3015,6 +3052,54 @@ async def import_equipment(payload: EquipmentImportPayload, request: Request):
 
 
 # ==================== END COSTUME + EQUIPMENT CSV IMPORT ====================
+
+
+# ==================== IMPORT HISTORY ====================
+
+
+@api_router.get("/imports")
+async def list_import_batches():
+    """Recent CSV import batches, newest first. Includes both costumes and equipment."""
+    docs = await db.import_batches.find({}, {"_id": 0}).sort("created_at", -1).limit(200).to_list(200)
+    return docs
+
+
+@api_router.post("/imports/{batch_id}/undo")
+async def undo_import_batch(batch_id: str):
+    """Delete every record inserted by a specific import batch. Safe to call multiple
+    times; already-undone batches return a 409."""
+    batch = await db.import_batches.find_one({"id": batch_id}, {"_id": 0})
+    if not batch:
+        raise HTTPException(status_code=404, detail="Import batch not found")
+    if batch.get("undone"):
+        raise HTTPException(status_code=409, detail="Batch already undone")
+    ids = batch.get("created_ids") or []
+    entity = batch.get("entity")
+    if entity == "costumes":
+        # Detach anything still on a map so we don't leave stale references
+        for cid in ids:
+            try:
+                await _detach_item_from_all_maps(cid)
+            except Exception:
+                pass
+        res = await db.costumes.delete_many({"id": {"$in": ids}})
+    elif entity == "equipment":
+        for eid in ids:
+            try:
+                await _detach_item_from_all_maps(eid)
+            except Exception:
+                pass
+        res = await db.equipment.delete_many({"id": {"$in": ids}})
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown entity '{entity}'")
+    await db.import_batches.update_one(
+        {"id": batch_id},
+        {"$set": {"undone": True, "undone_at": _now_iso(), "undone_count": res.deleted_count}},
+    )
+    return {"undone": True, "deleted": res.deleted_count, "entity": entity}
+
+
+# ==================== END IMPORT HISTORY ====================
 
 
 # ==================== ROLES & PERMISSIONS ====================

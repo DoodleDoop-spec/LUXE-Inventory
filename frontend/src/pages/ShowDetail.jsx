@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useConfirm } from "@/components/ConfirmDialog";
-import { ArrowLeft, Film, Flag, Calendar, Plus, Search, X, ExternalLink, Pencil, Upload, Image as ImageIcon, Trash2 } from "lucide-react";
+import { ArrowLeft, Film, Flag, Calendar, Plus, Search, X, ExternalLink, Pencil, Upload, Image as ImageIcon, Trash2, Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,12 +10,14 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
+import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
 
 export default function ShowDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
   const confirm = useConfirm();
+  const { hasPerm } = useAuth();
   const [show, setShow] = useState(null);
   const [costumes, setCostumes] = useState([]);
   const [allCostumes, setAllCostumes] = useState([]);
@@ -209,8 +211,16 @@ export default function ShowDetail() {
 
   if (!show) return <div className="py-20 eyebrow">LOADING…</div>;
 
+  const printManifest = () => {
+    document.documentElement.classList.add("printing-manifest");
+    setTimeout(() => {
+      window.print();
+      document.documentElement.classList.remove("printing-manifest");
+    }, 50);
+  };
+
   return (
-    <div className="space-y-10" data-testid="show-detail-page">
+    <div className="space-y-10 show-detail-screen" data-testid="show-detail-page">
       <Link to="/shows" data-testid="back-to-shows" className="inline-flex items-center text-sm text-[#71717A] hover:text-[#09090B]">
         <ArrowLeft className="h-4 w-4 mr-1" /> Back to Shows
       </Link>
@@ -267,6 +277,17 @@ export default function ShowDetail() {
             >
               <Plus className="h-4 w-4 mr-1" /> Add costumes / accessories
             </Button>
+            {hasPerm("costumes.view") && costumes.length > 0 && (
+              <Button
+                type="button"
+                onClick={printManifest}
+                variant="outline"
+                data-testid="show-print-manifest-btn"
+                className="rounded-none border-[#09090B] h-10"
+              >
+                <Printer className="h-4 w-4 mr-1" /> Print manifest
+              </Button>
+            )}
             <Button
               type="button"
               onClick={openEdit}
@@ -342,6 +363,9 @@ export default function ShowDetail() {
           </Button>
         </div>
       )}
+
+      {/* Printable show manifest — hidden on screen, only shown when window.print is triggered from Print manifest */}
+      <ShowManifestSheet show={show} costumes={costumes} originals={originals} />
 
       {/* Costume picker */}
       <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
@@ -550,3 +574,58 @@ export default function ShowDetail() {
     </div>
   );
 }
+
+function ShowManifestSheet({ show, costumes, originals }) {
+  const printedAt = new Date().toLocaleString();
+  const originalIds = new Set(originals.map((c) => c.id));
+  return (
+    <div className="show-manifest-only" data-testid="show-manifest-sheet" aria-hidden="true">
+      <header className="show-manifest-header">
+        <div className="show-manifest-eyebrow">WARDROBE MANIFEST</div>
+        <h1 className="show-manifest-title">{show.name}</h1>
+        <div className="show-manifest-meta">
+          {show.year && <span>{show.year}</span>}
+          <span>{costumes.length} costume{costumes.length === 1 ? "" : "s"}</span>
+          <span className="show-manifest-print-at">Printed {printedAt}</span>
+        </div>
+        {show.notes && <p className="show-manifest-notes">{show.notes}</p>}
+      </header>
+      <table className="show-manifest-table">
+        <thead>
+          <tr>
+            <th className="col-img"></th>
+            <th className="col-name">Costume</th>
+            <th className="col-cat">Category</th>
+            <th className="col-loc">Location</th>
+            <th className="col-qty">Qty</th>
+            <th className="col-check">✓</th>
+          </tr>
+        </thead>
+        <tbody>
+          {costumes.map((c) => (
+            <tr key={c.id} data-testid={`manifest-row-${c.id}`}>
+              <td className="col-img">
+                {c.image_id ? (
+                  <img src={`${process.env.REACT_APP_BACKEND_URL}/api/images/${c.image_id}`} alt="" />
+                ) : null}
+              </td>
+              <td className="col-name">
+                <div className="manifest-name">{c.name}</div>
+                {originalIds.has(c.id) && <div className="manifest-orig">ORIGINAL</div>}
+                {c.subcategory && <div className="manifest-sub">{c.subcategory}</div>}
+              </td>
+              <td className="col-cat">{c.category || "—"}</td>
+              <td className="col-loc">
+                {c.location || "—"}
+                {c.sub_location ? <div className="manifest-subloc">{c.sub_location}</div> : null}
+              </td>
+              <td className="col-qty">{c.total_quantity ?? 0}</td>
+              <td className="col-check">☐</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
