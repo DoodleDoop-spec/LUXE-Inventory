@@ -90,6 +90,14 @@ A proprietary internal tracking system for costumes/accessories with location tr
 - **Mobile polish** — hamburger nav on <md screens with a mobile drawer, responsive main content padding, collapsible search icon on all breakpoints.
 - **Deduplicated category dropdowns** — legacy duplicate-name categories no longer crash Radix Select.
 
+### Iteration 19 — Feb 2026 (Round B: restructure + permissions + student sizing + in-use quantity)
+- **Shows / Storage header spillage fix** — reduced `xl:text-6xl` → `sm:text-5xl` and switched to `flex-col md:flex-row` so the Add-button no longer collides with wrapped descriptions.
+- **Nested Settings tabs** — `Categories` and `Sorting Systems` top-level tabs replaced with two new top-level tabs: **Costumes** and **Equipment**, each containing internal `Categories` and `Sorting Systems` sub-tabs. `EquipmentTaxonomySection` refactored to render the same nested pattern.
+- **Permission-Aware UI** — nav items and Settings sub-tabs are filtered through `useAuth().hasPerm()`. Nav items declare a `perm` key (e.g. `costumes.view`) and the top nav (desktop + mobile) hides any item the current role isn't granted. Settings hides Costumes/Equipment when the role lacks `taxonomy.edit`, Roles when it lacks `roles.edit`, and Organization when it lacks `users.invite` / `users.manage_roles` / `settings.edit`. Verified: a `Student` role sees only Dash / Costumes / Shows / Settings-with-General-only.
+- **Student sizing → org Sorting Systems** — student sizes editor replaced with one dropdown per org sorting system, each defaulting to `— N/A —` and offering the system's own values. Free-form measurements still live alongside for chest/waist/height style numbers.
+- **Link map shape / pin to a costume** — Floorplan editor properties panel now has a `LINK TO COSTUME` dropdown alongside sublocation linking. Selecting a costume auto-fills the shape's label with the costume name (when it hasn't been customized) and offers a "→ Open costume detail" jump. Backend already supports `item_type` + `item_id` on shape/pin docs.
+- **In-Use qty + student assignment + Free counter** — Costume model gains `in_use_quantity: int` and `assigned_student_ids: List[str]`. Create + Update endpoints clamp `in_use_quantity` to `total_quantity` and reset both on `in_use=false`. The Inventory card now displays `<green>N</green> in-use · <black>M</black> free` when a costume is in use. The Costume Create/Edit dialog exposes a numeric qty input, a live Free counter, and a scrollable student checklist. Verified end-to-end via curl (turn ON → qty=1, students=[…]; turn OFF → qty=0, students=[]).
+
 ### Iteration 18 — Feb 2026 (Round A: UI polish)
 Quick UI polish batch ahead of the bigger permission-aware / import / director-handoff work:
 - **Nav shrunk + Dashboard → Dash** — main nav tab height and padding trimmed (`px-2.5 py-1.5`, gap `0.5`, `text-[13px]`, `h-3.5` icons). "Dashboard" label renamed to "Dash".

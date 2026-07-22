@@ -151,6 +151,8 @@ class CostumeBase(BaseModel):
     current_show_id: Optional[str] = None
     pinned: Optional[bool] = False
     total_quantity_override: Optional[int] = None  # used when sorting_system is blank
+    in_use_quantity: Optional[int] = 0  # how many pieces are currently on stage (<= total)
+    assigned_student_ids: Optional[List[str]] = None  # students wearing this piece
 
 
 class CostumeCreate(CostumeBase):
@@ -189,6 +191,8 @@ class CostumeUpdate(BaseModel):
     current_show_id: Optional[str] = None
     pinned: Optional[bool] = None
     total_quantity_override: Optional[int] = None
+    in_use_quantity: Optional[int] = None
+    assigned_student_ids: Optional[List[str]] = None
 
 
 class FlagPayload(BaseModel):
@@ -252,6 +256,8 @@ class Costume(BaseModel):
     updated_at: str
     group_id: Optional[str] = None
     variant_label: str = ""
+    in_use_quantity: int = 0
+    assigned_student_ids: List[str] = Field(default_factory=list)
 
 
 class InventoryGroup(BaseModel):
@@ -634,6 +640,8 @@ async def create_costume(payload: CostumeCreate):
         "in_use": bool(payload.in_use),
         "in_use_note": (payload.in_use_note or "").strip() if payload.in_use else "",
         "in_use_since": now if payload.in_use else None,
+        "in_use_quantity": max(0, min(int(payload.in_use_quantity or 0), int(total_qty))) if payload.in_use else 0,
+        "assigned_student_ids": list(payload.assigned_student_ids or []) if payload.in_use else [],
         "current_show_id": current_show_id,
         "pinned": bool(payload.pinned),
         "group_id": payload.group_id,
@@ -727,8 +735,14 @@ async def update_costume(costume_id: str, payload: CostumeUpdate):
         else:
             updates["in_use_since"] = None
             updates["current_show_id"] = None
+            updates["in_use_quantity"] = 0
+            updates["assigned_student_ids"] = []
             if "in_use_note" not in updates:
                 updates["in_use_note"] = ""
+    # Clamp in_use_quantity to total_quantity if either changes
+    if "in_use_quantity" in updates:
+        total = updates.get("total_quantity", existing.get("total_quantity", 0)) or 0
+        updates["in_use_quantity"] = max(0, min(int(updates["in_use_quantity"] or 0), int(total)))
     if "note_image_ids" in updates:
         updates["note_image_ids"] = [str(x) for x in (updates["note_image_ids"] or []) if x]
     updates["updated_at"] = _now_iso()

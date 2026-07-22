@@ -75,12 +75,12 @@ export default function Locations() {
 
   return (
     <div className="space-y-8" data-testid="locations-page">
-      <div className="space-y-2">
+      <div className="space-y-2 max-w-2xl">
         <div className="eyebrow">LOCATIONS</div>
-        <h1 className="font-display text-4xl sm:text-5xl xl:text-6xl tracking-tight font-bold text-[#09090B] leading-[1.05]">
+        <h1 className="font-display text-4xl sm:text-5xl tracking-tight font-bold text-[#09090B] leading-[1.05]">
           Storage Locations
         </h1>
-        <p className="text-sm md:text-base text-[#71717A] max-w-2xl">
+        <p className="text-sm md:text-base text-[#71717A]">
           Browse the storage tree. Click to view contents. Drag items onto a location to move them.
         </p>
       </div>

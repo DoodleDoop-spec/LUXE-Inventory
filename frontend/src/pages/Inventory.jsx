@@ -683,6 +683,12 @@ function CostumeCard({ costume, onEdit, onDelete, sizingSystems, showsById, cate
         <div className="text-right shrink-0">
           <div className="font-display text-2xl font-bold tabular-nums text-[#09090B]">{costume.total_quantity}</div>
           <div className="eyebrow text-[9px]">UNITS</div>
+          {costume.in_use && (costume.total_quantity || 0) > 0 && (
+            <div className="mt-1 text-[10px] font-mono-label tabular-nums text-[#71717A]" data-testid={`in-use-count-${costume.id}`}>
+              <span className="text-[#10B981]">{costume.in_use_quantity || 0}</span> in-use ·
+              <span className="text-[#09090B] ml-1">{Math.max(0, (costume.total_quantity || 0) - (costume.in_use_quantity || 0))}</span> free
+            </div>
+          )}
         </div>
       </div>
       {(costume.keywords || []).length > 0 && (

@@ -24,15 +24,18 @@ export default function LocationMap() {
   const [dirty, setDirty] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [allCostumes, setAllCostumes] = useState([]);
 
   const load = async () => {
     try {
-      const [r, la] = await Promise.all([
+      const [r, la, cs] = await Promise.all([
         api.get(`/locations/${id}`),
         api.get("/locations"),
+        api.get("/costumes"),
       ]);
       setLoc(r.data);
       setAllLocations(la.data);
+      setAllCostumes(cs.data);
       setMode(r.data.map_mode || "none");
       setImageId(r.data.map_image_id || null);
       setPins(r.data.map_pins || []);
@@ -163,6 +166,7 @@ export default function LocationMap() {
           onUpload={uploadPhoto}
           uploading={uploading}
           childLocations={allLocations.filter((l) => l.parent_id === id)}
+          allCostumes={allCostumes}
           navigate={navigate}
           editMode={editMode}
         />
@@ -175,6 +179,7 @@ export default function LocationMap() {
           tool={tool}
           setTool={setTool}
           childLocations={allLocations.filter((l) => l.parent_id === id)}
+          allCostumes={allCostumes}
           navigate={navigate}
           editMode={editMode}
         />
@@ -184,7 +189,7 @@ export default function LocationMap() {
 }
 
 /* ============= PHOTO + PINS EDITOR ============= */
-function PhotoPinEditor({ imageId, setImageId, pins, setPins, onUpload, uploading, childLocations = [], navigate, editMode = true }) {
+function PhotoPinEditor({ imageId, setImageId, pins, setPins, onUpload, uploading, childLocations = [], allCostumes = [], navigate, editMode = true }) {
   const imgRef = useRef(null);
   const [selectedPin, setSelectedPin] = useState(null);
   const [dragging, setDragging] = useState(null);
@@ -398,7 +403,7 @@ function PhotoPinEditor({ imageId, setImageId, pins, setPins, onUpload, uploadin
 }
 
 /* ============= FLOORPLAN EDITOR ============= */
-function FloorplanEditor({ shapes, setShapes, tool, setTool, childLocations = [], navigate, editMode = true }) {
+function FloorplanEditor({ shapes, setShapes, tool, setTool, childLocations = [], allCostumes = [], navigate, editMode = true }) {
   const svgRef = useRef(null);
   const [selectedId, setSelectedId] = useState(null);
   const [drag, setDrag] = useState(null); // { id, kind: "move"|"resize", startX, startY, ox, oy, ow, oh }
@@ -721,6 +726,43 @@ function FloorplanEditor({ shapes, setShapes, tool, setTool, childLocations = []
                   <p className="text-[10px] text-[#A1A1AA] mt-1">Double-click a shape to jump.</p>
                 </div>
               )}
+              {/* LINK TO COSTUME (any costume in the org) */}
+              <div>
+                <div className="text-[10px] font-mono-label text-[#71717A] mb-1">LINK TO COSTUME</div>
+                <select
+                  data-testid="floorplan-selected-costume"
+                  value={selected.item_type === "costume" ? (selected.item_id || "") : ""}
+                  onChange={(e) => {
+                    const newId = e.target.value || null;
+                    if (!newId) {
+                      updateSelected({ item_id: null, item_type: null });
+                      return;
+                    }
+                    const c = allCostumes.find((x) => x.id === newId);
+                    const patch = { item_id: newId, item_type: "costume" };
+                    const currentLabel = (selected.label || "").trim();
+                    const isDefault = !currentLabel || currentLabel === "Rack" || currentLabel === "Room label" || /^Pin \d+$/.test(currentLabel);
+                    if (c && isDefault) patch.label = c.name;
+                    updateSelected(patch);
+                  }}
+                  className="w-full border border-[#E4E4E7] h-8 text-xs px-1 rounded-none bg-white"
+                >
+                  <option value="">— none —</option>
+                  {allCostumes.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+                {selected.item_type === "costume" && selected.item_id && (
+                  <button
+                    type="button"
+                    data-testid="floorplan-open-costume"
+                    onClick={() => navigate(`/costume/${selected.item_id}`)}
+                    className="text-[11px] text-[#09090B] underline hover:text-[#3B82F6] mt-1"
+                  >
+                    → Open costume detail
+                  </button>
+                )}
+              </div>
               <button
                 type="button"
                 data-testid="floorplan-delete-selected"

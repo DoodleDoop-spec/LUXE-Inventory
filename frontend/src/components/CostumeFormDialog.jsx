@@ -49,6 +49,9 @@ export default function CostumeFormDialog({
   const [variantLabel, setVariantLabel] = useState("");
   const [inUse, setInUse] = useState(false);
   const [inUseNote, setInUseNote] = useState("");
+  const [inUseQuantity, setInUseQuantity] = useState(0);
+  const [assignedStudentIds, setAssignedStudentIds] = useState([]);
+  const [studentsList, setStudentsList] = useState([]);
   const [currentShowId, setCurrentShowId] = useState("");
   const [pinned, setPinned] = useState(false);
   const [totalOverride, setTotalOverride] = useState(0);
@@ -72,6 +75,7 @@ export default function CostumeFormDialog({
   );
   const sizeKeys = currentSystem?.sizes || [];
   const total = sizeKeys.reduce((acc, s) => acc + (Number(sizes[s]) || 0), 0);
+  const totalQty = systemName ? total : Math.max(0, Number(totalOverride) || 0);
 
   const currentCategory = useMemo(
     () => (categories || []).find((c) => c.name === category),
@@ -167,6 +171,8 @@ export default function CostumeFormDialog({
       setVariantLabel(editing.variant_label || "");
       setInUse(!!editing.in_use);
       setInUseNote(editing.in_use_note || "");
+      setInUseQuantity(editing.in_use_quantity || 0);
+      setAssignedStudentIds(editing.assigned_student_ids || []);
       setCurrentShowId(editing.current_show_id || "");
       setPinned(!!editing.pinned);
     } else {
@@ -191,6 +197,8 @@ export default function CostumeFormDialog({
       setVariantLabel("");
       setInUse(false);
       setInUseNote("");
+      setInUseQuantity(0);
+      setAssignedStudentIds([]);
       setCurrentShowId("");
       setPinned(false);
     }
@@ -253,6 +261,10 @@ export default function CostumeFormDialog({
       try {
         const r = await api.get("/flag-categories");
         setFlagCategories(r.data);
+      } catch { /* ignore */ }
+      try {
+        const s = await api.get("/students");
+        setStudentsList(s.data);
       } catch { /* ignore */ }
     })();
   }, [open]);
@@ -538,6 +550,8 @@ export default function CostumeFormDialog({
         variant_label: variantLabel.trim(),
         in_use: inUse,
         in_use_note: inUse ? inUseNote.trim() : "",
+        in_use_quantity: inUse ? Number(inUseQuantity) || 0 : 0,
+        assigned_student_ids: inUse ? assignedStudentIds : [],
         current_show_id: inUse && currentShowId ? currentShowId : null,
         pinned: !!pinned,
       };
@@ -1305,6 +1319,63 @@ export default function CostumeFormDialog({
                   placeholder="Optional context (e.g. On stage for run of Hairspray, Feb 5–20)"
                   className="rounded-none border-[#E4E4E7]"
                 />
+                {/* Quantity in use */}
+                {(totalQty || 0) > 0 && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Label className="eyebrow text-[10px]">QUANTITY IN USE</Label>
+                      <input
+                        type="number"
+                        min="0"
+                        max={totalQty}
+                        data-testid="form-in-use-qty"
+                        value={inUseQuantity}
+                        onChange={(e) => setInUseQuantity(Math.max(0, Math.min(Number(e.target.value) || 0, totalQty)))}
+                        className="w-full rounded-none border border-[#E4E4E7] h-10 px-2 tabular-nums mt-1"
+                      />
+                    </div>
+                    <div className="flex flex-col justify-end">
+                      <div className="text-[10px] font-mono-label text-[#71717A]">FREE</div>
+                      <div className="font-display text-lg font-semibold tabular-nums text-[#09090B]" data-testid="form-free-qty">
+                        {Math.max(0, (totalQty || 0) - (Number(inUseQuantity) || 0))} / {totalQty || 0}
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {/* Student assignment */}
+                <div>
+                  <Label className="eyebrow text-[10px]">ASSIGNED STUDENTS (OPTIONAL)</Label>
+                  {studentsList.length === 0 ? (
+                    <div className="text-[11px] text-[#71717A] mt-1">No students in the roster yet. Add them from the Students tab.</div>
+                  ) : (
+                    <div className="mt-1 border border-[#E4E4E7] max-h-40 overflow-y-auto divide-y divide-[#F4F4F5]">
+                      {studentsList.map((st) => {
+                        const on = assignedStudentIds.includes(st.id);
+                        return (
+                          <label key={st.id} className="flex items-center gap-2 px-2 py-1.5 hover:bg-[#FAFAFA] cursor-pointer" data-testid={`assign-student-${st.id}`}>
+                            <input
+                              type="checkbox"
+                              checked={on}
+                              onChange={(e) => {
+                                setAssignedStudentIds((prev) => e.target.checked ? [...prev, st.id] : prev.filter((x) => x !== st.id));
+                              }}
+                              className="rounded-none"
+                            />
+                            <span className="text-sm text-[#09090B] flex-1 truncate">
+                              {[st.first_name, st.last_name].filter(Boolean).join(" ")}
+                            </span>
+                            {st.grade && <span className="text-[10px] text-[#71717A]">{st.grade}</span>}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {assignedStudentIds.length > 0 && (
+                    <p className="text-[10px] font-mono-label text-[#71717A] mt-1">
+                      {assignedStudentIds.length} STUDENT{assignedStudentIds.length === 1 ? "" : "S"} ASSIGNED
+                    </p>
+                  )}
+                </div>
                 {costumeShows.length > 0 && (
                   <div className="space-y-1">
                     <Label className="eyebrow text-[10px]">CURRENT SHOW (OPTIONAL)</Label>

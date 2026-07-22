@@ -116,13 +116,13 @@ export default function Shows() {
 
   return (
     <div className="space-y-10" data-testid="shows-page">
-      <div className="flex items-end justify-between flex-wrap gap-4">
-        <div className="space-y-2">
+      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+        <div className="space-y-2 max-w-2xl">
           <div className="eyebrow">SHOWS</div>
-          <h1 className="font-display text-4xl sm:text-5xl xl:text-6xl tracking-tight font-bold text-[#09090B] leading-[1.05]">
+          <h1 className="font-display text-4xl sm:text-5xl tracking-tight font-bold text-[#09090B] leading-[1.05]">
             Shows
           </h1>
-          <p className="text-sm text-[#71717A] max-w-2xl">
+          <p className="text-sm text-[#71717A]">
             Every show that costumes / accessories have appeared in, grouped by year.
             Click a show to see the pieces used in it.
           </p>
@@ -130,7 +130,7 @@ export default function Shows() {
         <Button
           data-testid="shows-add-btn"
           onClick={openNew}
-          className="bg-[#09090B] hover:bg-[#27272A] rounded-none h-11 px-5 text-white"
+          className="bg-[#09090B] hover:bg-[#27272A] rounded-none h-11 px-5 text-white shrink-0"
         >
           <Plus className="h-4 w-4 mr-1" /> Add Show
         </Button>

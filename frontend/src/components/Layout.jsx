@@ -6,14 +6,14 @@ import HangerIcon from "@/components/HangerIcon";
 import { useAuth } from "@/context/AuthContext";
 
 const navItems = [
-  { to: "/", label: "Dash", icon: LayoutDashboard, testId: "nav-dashboard" },
-  { to: "/inventory", label: "Costumes", icon: HangerIcon, testId: "nav-inventory" },
-  { to: "/equipment", label: "Equipment", icon: Wrench, testId: "nav-equipment" },
-  { to: "/students", label: "Students", icon: Users, testId: "nav-students" },
-  { to: "/shows", label: "Shows", icon: Film, testId: "nav-shows" },
-  { to: "/locations", label: "Storage", icon: MapPin, testId: "nav-locations" },
-  { to: "/flags", label: "Flags", icon: Flag, testId: "nav-flags" },
-  { to: "/settings", label: "Settings", icon: SettingsIcon, testId: "nav-settings" },
+  { to: "/", label: "Dash", icon: LayoutDashboard, testId: "nav-dashboard", perm: null },
+  { to: "/inventory", label: "Costumes", icon: HangerIcon, testId: "nav-inventory", perm: "costumes.view" },
+  { to: "/equipment", label: "Equipment", icon: Wrench, testId: "nav-equipment", perm: "equipment.view" },
+  { to: "/students", label: "Students", icon: Users, testId: "nav-students", perm: "students.view" },
+  { to: "/shows", label: "Shows", icon: Film, testId: "nav-shows", perm: "shows.view" },
+  { to: "/locations", label: "Storage", icon: MapPin, testId: "nav-locations", perm: "locations.view" },
+  { to: "/flags", label: "Flags", icon: Flag, testId: "nav-flags", perm: "flags.view" },
+  { to: "/settings", label: "Settings", icon: SettingsIcon, testId: "nav-settings", perm: null },
 ];
 
 export default function Layout() {
@@ -21,7 +21,7 @@ export default function Layout() {
   const navigate = useNavigate();
   const [globalQ, setGlobalQ] = useState("");
   const { settings } = useSettings();
-  const { user, logout } = useAuth();
+  const { user, logout, hasPerm } = useAuth();
   const [searchOpen, setSearchOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -116,7 +116,7 @@ export default function Layout() {
               )}
 
               <nav className="hidden md:flex items-center gap-0.5" data-testid="main-nav">
-                {navItems.map(({ to, label, icon: Icon, testId }) => {
+                {navItems.filter(({ perm }) => !perm || hasPerm(perm)).map(({ to, label, icon: Icon, testId }) => {
                   const active = to === "/" ? location.pathname === "/" : location.pathname.startsWith(to);
                   return (
                     <NavLink
@@ -202,7 +202,7 @@ export default function Layout() {
           {/* Mobile nav drawer */}
           {mobileNavOpen && (
             <nav className="md:hidden border-t border-[#E4E4E7] py-2 grid grid-cols-4 gap-1" data-testid="mobile-nav">
-              {navItems.map(({ to, label, icon: Icon, testId }) => {
+              {navItems.filter(({ perm }) => !perm || hasPerm(perm)).map(({ to, label, icon: Icon, testId }) => {
                 const active = to === "/" ? location.pathname === "/" : location.pathname.startsWith(to);
                 return (
                   <NavLink

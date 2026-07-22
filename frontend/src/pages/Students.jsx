@@ -41,17 +41,20 @@ export default function Students() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [inviteBusy, setInviteBusy] = useState(false);
+  const [sortingSystems, setSortingSystems] = useState([]);
 
   const load = async () => {
     try {
-      const [ls, cf, st] = await Promise.all([
+      const [ls, cf, st, ss] = await Promise.all([
         api.get("/students"),
         api.get("/students/config"),
         api.get("/students/stats"),
+        api.get("/sizing-systems"),
       ]);
       setStudents(ls.data);
       setConfig(cf.data);
       setStats(st.data);
+      setSortingSystems(ss.data);
     } catch {
       toast.error("Failed to load students");
     }
@@ -72,15 +75,18 @@ export default function Students() {
     setForm({
       ...emptyForm,
       measurements: Object.fromEntries(config.measurement_keys.map((k) => [k, ""])),
-      sizes: Object.fromEntries(config.size_keys.map((k) => [k, ""])),
+      // Seed one slot per configured sorting system, default "N/A"
+      sizes: Object.fromEntries(sortingSystems.map((s) => [s.name, "N/A"])),
     });
     setDialogOpen(true);
   };
   const openEdit = (s) => {
     setEditing(s.id);
-    // Merge existing measurements/sizes with default keys so every field renders.
+    // Merge existing measurements with default keys so every field renders.
     const measurements = { ...Object.fromEntries(config.measurement_keys.map((k) => [k, ""])), ...(s.measurements || {}) };
-    const sizes = { ...Object.fromEntries(config.size_keys.map((k) => [k, ""])), ...(s.sizes || {}) };
+    // For sizes, seed one slot per sorting system; keep any custom keys the student already had.
+    const seed = Object.fromEntries(sortingSystems.map((sys) => [sys.name, "N/A"]));
+    const sizes = { ...seed, ...(s.sizes || {}) };
     setForm({
       first_name: s.first_name || "",
       last_name: s.last_name || "",
@@ -417,34 +423,41 @@ export default function Students() {
                 </div>
               </div>
 
-              {/* Sizes */}
+              {/* Sizes — one dropdown per org sorting system */}
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <Label className="eyebrow">SIZES</Label>
-                  <button type="button" onClick={() => addCustomField("size")} className="text-xs text-[#09090B] hover:underline flex items-center gap-1" data-testid="add-size-btn">
-                    <Plus className="h-3 w-3" /> Add size
-                  </button>
+                  <Label className="eyebrow">SIZES · BY SORTING SYSTEM</Label>
+                  {sortingSystems.length === 0 && (
+                    <span className="text-xs text-[#71717A]">Add sorting systems in Settings → Costumes</span>
+                  )}
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                  {Object.entries(form.sizes).map(([k, v]) => (
-                    <div key={k}>
-                      <Label className="text-[10px] font-mono-label text-[#71717A]">{k.toUpperCase()}</Label>
-                      <div className="flex items-center gap-1">
-                        <Input
-                          data-testid={`student-s-${k.replace(/\W+/g, "-")}`}
-                          value={v}
-                          onChange={(e) => setSize(k, e.target.value)}
-                          className="rounded-none border-[#E4E4E7] h-9 mt-1 flex-1"
-                        />
-                        {!config.size_keys.includes(k) && (
-                          <button type="button" onClick={() => removeField("size", k)} className="text-[#71717A] hover:text-[#EF4444] mt-1" title="Remove field">
-                            <X className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                {sortingSystems.length === 0 ? (
+                  <div className="text-xs text-[#71717A] border border-dashed border-[#E4E4E7] p-4">
+                    No sorting systems configured yet.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                    {sortingSystems.map((sys) => {
+                      const v = form.sizes[sys.name] ?? "N/A";
+                      return (
+                        <div key={sys.id}>
+                          <Label className="text-[10px] font-mono-label text-[#71717A]">{sys.name.toUpperCase()}</Label>
+                          <select
+                            data-testid={`student-s-${sys.name.replace(/\W+/g, "-")}`}
+                            value={v}
+                            onChange={(e) => setSize(sys.name, e.target.value)}
+                            className="w-full rounded-none border border-[#E4E4E7] h-9 mt-1 px-2 text-sm bg-white"
+                          >
+                            <option value="N/A">— N/A —</option>
+                            {sys.sizes.map((val) => (
+                              <option key={val} value={val}>{val}</option>
+                            ))}
+                          </select>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* Notes */}

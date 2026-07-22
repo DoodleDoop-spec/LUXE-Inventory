@@ -3,6 +3,7 @@ import { api } from "@/lib/api";
 import { useSettings } from "@/context/SettingsContext";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { Plus, Trash2, Tag, Save, Ruler, ChevronDown, ChevronRight, X, Film, Upload, Image as ImageIcon, LinkIcon, Settings as SettingsIcon, MapPin, Pencil, Wrench, ShieldCheck, Building2 } from "lucide-react";
+import HangerIcon from "@/components/HangerIcon";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,8 +17,13 @@ import LocationTree from "@/components/LocationTree";
 import CollapsibleBox from "@/components/CollapsibleBox";
 import RolesSettings from "@/pages/RolesSettings";
 import OrgSettings from "@/pages/OrgSettings";
+import { useAuth } from "@/context/AuthContext";
 
 export default function Settings() {
+  const { hasPerm } = useAuth();
+  const canEditTax = hasPerm("taxonomy.edit");
+  const canEditRoles = hasPerm("roles.edit");
+  const canEditOrg = hasPerm("users.invite") || hasPerm("users.manage_roles") || hasPerm("settings.edit");
   const { settings: globalSettings, updateSettings: pushSettings, refreshSettings } = useSettings();
   const confirm = useConfirm();
   const [categories, setCategories] = useState([]);
@@ -294,22 +300,19 @@ export default function Settings() {
           <TabsTrigger value="storage" data-testid="settings-tab-storage" className="rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-11 px-5 gap-1.5">
             <MapPin className="h-3.5 w-3.5" /> Storage
           </TabsTrigger>
-          <TabsTrigger value="taxonomy" data-testid="settings-tab-taxonomy" className="rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-11 px-5 gap-1.5">
-            <Tag className="h-3.5 w-3.5" /> Categories
+          <TabsTrigger value="costumes" data-testid="settings-tab-costumes" className={`rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-11 px-5 gap-1.5 ${!canEditTax ? "hidden" : ""}`}>
+            <HangerIcon className="h-3.5 w-3.5" /> Costumes
           </TabsTrigger>
-          <TabsTrigger value="sorting" data-testid="settings-tab-sorting" className="rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-11 px-5 gap-1.5">
-            <Ruler className="h-3.5 w-3.5" /> Sorting Systems
-          </TabsTrigger>
-          <TabsTrigger value="equipment" data-testid="settings-tab-equipment" className="rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-11 px-5 gap-1.5">
+          <TabsTrigger value="equipment" data-testid="settings-tab-equipment" className={`rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-11 px-5 gap-1.5 ${!canEditTax ? "hidden" : ""}`}>
             <Wrench className="h-3.5 w-3.5" /> Equipment
           </TabsTrigger>
           <TabsTrigger value="shows" data-testid="settings-tab-shows" className="rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-11 px-5 gap-1.5">
             <Film className="h-3.5 w-3.5" /> Shows
           </TabsTrigger>
-          <TabsTrigger value="roles" data-testid="settings-tab-roles" className="rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-11 px-5 gap-1.5">
+          <TabsTrigger value="roles" data-testid="settings-tab-roles" className={`rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-11 px-5 gap-1.5 ${!canEditRoles ? "hidden" : ""}`}>
             <ShieldCheck className="h-3.5 w-3.5" /> Roles
           </TabsTrigger>
-          <TabsTrigger value="org" data-testid="settings-tab-org" className="rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-11 px-5 gap-1.5">
+          <TabsTrigger value="org" data-testid="settings-tab-org" className={`rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-11 px-5 gap-1.5 ${!canEditOrg ? "hidden" : ""}`}>
             <Building2 className="h-3.5 w-3.5" /> Organization
           </TabsTrigger>
         </TabsList>
@@ -452,7 +455,18 @@ export default function Settings() {
       </section>
         </TabsContent>
 
-        <TabsContent value="taxonomy" className="mt-6" data-testid="settings-content-taxonomy">
+        <TabsContent value="costumes" className="mt-6" data-testid="settings-content-costumes">
+          <Tabs defaultValue="taxonomy" data-testid="costumes-subtabs">
+            <TabsList className="rounded-none border border-[#E4E4E7] p-0 h-auto bg-white flex justify-start w-fit mb-6">
+              <TabsTrigger value="taxonomy" data-testid="costumes-subtab-taxonomy" className="rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-9 px-4 text-xs gap-1.5">
+                <Tag className="h-3 w-3" /> Categories
+              </TabsTrigger>
+              <TabsTrigger value="sorting" data-testid="costumes-subtab-sorting" className="rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-9 px-4 text-xs gap-1.5">
+                <Ruler className="h-3 w-3" /> Sorting Systems
+              </TabsTrigger>
+            </TabsList>
+
+        <TabsContent value="taxonomy" data-testid="settings-content-taxonomy">
       {/* Categories with nested subcategories */}
       <section className="grid md:grid-cols-12 gap-8">
         <div className="md:col-span-4">
@@ -536,6 +550,75 @@ export default function Settings() {
           <CategoryMergeCard categories={categories} onMerged={fetchAll} />
         </div>
       </section>
+        </TabsContent>
+
+        <TabsContent value="sorting" data-testid="settings-content-sorting">
+      {/* Sorting Systems */}
+      <section className="grid md:grid-cols-12 gap-8">
+        <div className="md:col-span-4">
+          <div className="eyebrow">SORTING</div>
+          <h2 className="font-display text-xl font-semibold text-[#09090B] mt-2">Sorting systems</h2>
+          <p className="text-sm text-[#71717A] mt-2">
+            Any set of values you use to break costumes down — sizes (XS/S/M), colors, positions, whatever.
+          </p>
+        </div>
+        <div className="md:col-span-8 space-y-4">
+          <form onSubmit={addSizingSystem} className="border border-[#E4E4E7] p-4 grid md:grid-cols-2 gap-3">
+            <Input data-testid="settings-new-sys-name" placeholder="System name" value={newSysName} onChange={(e) => setNewSysName(e.target.value)} className="h-11 rounded-none border-[#E4E4E7]" />
+            <Input data-testid="settings-new-sys-sizes" placeholder="Values, comma-separated" value={newSysSizes} onChange={(e) => setNewSysSizes(e.target.value)} className="h-11 rounded-none border-[#E4E4E7]" />
+            <div className="md:col-span-2 flex justify-end">
+              <Button data-testid="settings-add-sys-btn" type="submit" className="bg-[#09090B] text-white hover:bg-[#27272A] rounded-none h-10 px-4">
+                <Plus className="h-4 w-4 mr-1" /> Add sorting system
+              </Button>
+            </div>
+          </form>
+          <div className="space-y-2">
+            {sizingSystems.length === 0 ? (
+              <div className="p-8 text-center text-[#71717A] border border-[#E4E4E7] bg-white">No sorting systems yet.</div>
+            ) : sizingSystems.map((s) => (
+              <CollapsibleBox
+                key={s.id}
+                testId={`sys-row-${s.id}`}
+                accentColor="#3B82F6"
+                icon={<Ruler className="h-4 w-4 text-[#3B82F6]" />}
+                title={s.name}
+                subtitle={`${s.sizes.length} value${s.sizes.length === 1 ? "" : "s"} · ${s.sizes.join(", ")}`}
+                actions={
+                  <>
+                    <button data-testid={`edit-sys-${s.id}`} onClick={() => startEditSys(s)} className="text-[#09090B] hover:bg-[#F4F4F5] p-2" aria-label="Edit">
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                    <button data-testid={`delete-sys-${s.id}`} onClick={() => removeSizingSystem(s.id, s.name)} className="text-[#EF4444] hover:bg-[#FEF2F2] p-2" aria-label="Delete sorting system">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </>
+                }
+              >
+                {editingSys === s.id ? (
+                  <div className="space-y-2">
+                    <Input data-testid={`edit-sys-name-${s.id}`} value={editSysName} onChange={(e) => setEditSysName(e.target.value)} className="h-10 rounded-none border-[#E4E4E7] bg-white" placeholder="System name" />
+                    <Input data-testid={`edit-sys-sizes-${s.id}`} value={editSysSizes} onChange={(e) => setEditSysSizes(e.target.value)} className="h-10 rounded-none border-[#E4E4E7] bg-white" placeholder="Values (comma-separated)" />
+                    <div className="flex gap-2 justify-end">
+                      <Button variant="outline" onClick={() => setEditingSys(null)} className="rounded-none h-9" data-testid={`cancel-edit-sys-${s.id}`}>Cancel</Button>
+                      <Button onClick={saveEditSys} className="bg-[#09090B] text-white rounded-none h-9" data-testid={`save-edit-sys-${s.id}`}>
+                        <Save className="h-4 w-4 mr-1" /> Save
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {s.sizes.map((v) => (
+                      <span key={v} className="text-xs px-2 py-1 border border-[#E4E4E7] bg-white font-mono-label">{v}</span>
+                    ))}
+                  </div>
+                )}
+              </CollapsibleBox>
+            ))}
+          </div>
+        </div>
+      </section>
+        </TabsContent>
+          </Tabs>
         </TabsContent>
 
         <TabsContent value="equipment" className="mt-6" data-testid="settings-content-equipment">
@@ -663,73 +746,6 @@ export default function Settings() {
               </div>
             );
           })}
-        </div>
-      </section>
-        </TabsContent>
-
-        <TabsContent value="sorting" className="mt-6" data-testid="settings-content-sorting">
-      {/* Sorting Systems */}
-      <section className="grid md:grid-cols-12 gap-8">
-        <div className="md:col-span-4">
-          <div className="eyebrow">SORTING</div>
-          <h2 className="font-display text-xl font-semibold text-[#09090B] mt-2">Sorting systems</h2>
-          <p className="text-sm text-[#71717A] mt-2">
-            Any set of values you use to break costumes down — sizes (XS/S/M), colors, positions, whatever.
-          </p>
-        </div>
-        <div className="md:col-span-8 space-y-4">
-          <form onSubmit={addSizingSystem} className="border border-[#E4E4E7] p-4 grid md:grid-cols-2 gap-3">
-            <Input data-testid="settings-new-sys-name" placeholder="System name" value={newSysName} onChange={(e) => setNewSysName(e.target.value)} className="h-11 rounded-none border-[#E4E4E7]" />
-            <Input data-testid="settings-new-sys-sizes" placeholder="Values, comma-separated" value={newSysSizes} onChange={(e) => setNewSysSizes(e.target.value)} className="h-11 rounded-none border-[#E4E4E7]" />
-            <div className="md:col-span-2 flex justify-end">
-              <Button data-testid="settings-add-sys-btn" type="submit" className="bg-[#09090B] text-white hover:bg-[#27272A] rounded-none h-10 px-4">
-                <Plus className="h-4 w-4 mr-1" /> Add sorting system
-              </Button>
-            </div>
-          </form>
-          <div className="space-y-2">
-            {sizingSystems.length === 0 ? (
-              <div className="p-8 text-center text-[#71717A] border border-[#E4E4E7] bg-white">No sorting systems yet.</div>
-            ) : sizingSystems.map((s) => (
-              <CollapsibleBox
-                key={s.id}
-                testId={`sys-row-${s.id}`}
-                accentColor="#3B82F6"
-                icon={<Ruler className="h-4 w-4 text-[#3B82F6]" />}
-                title={s.name}
-                subtitle={`${s.sizes.length} value${s.sizes.length === 1 ? "" : "s"} · ${s.sizes.join(", ")}`}
-                actions={
-                  <>
-                    <button data-testid={`edit-sys-${s.id}`} onClick={() => startEditSys(s)} className="text-[#09090B] hover:bg-[#F4F4F5] p-2" aria-label="Edit">
-                      <Pencil className="h-4 w-4" />
-                    </button>
-                    <button data-testid={`delete-sys-${s.id}`} onClick={() => removeSizingSystem(s.id, s.name)} className="text-[#EF4444] hover:bg-[#FEF2F2] p-2" aria-label="Delete sorting system">
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </>
-                }
-              >
-                {editingSys === s.id ? (
-                  <div className="space-y-2">
-                    <Input data-testid={`edit-sys-name-${s.id}`} value={editSysName} onChange={(e) => setEditSysName(e.target.value)} className="h-10 rounded-none border-[#E4E4E7] bg-white" placeholder="System name" />
-                    <Input data-testid={`edit-sys-sizes-${s.id}`} value={editSysSizes} onChange={(e) => setEditSysSizes(e.target.value)} className="h-10 rounded-none border-[#E4E4E7] bg-white" placeholder="Values (comma-separated)" />
-                    <div className="flex gap-2 justify-end">
-                      <Button variant="outline" onClick={() => setEditingSys(null)} className="rounded-none h-9" data-testid={`cancel-edit-sys-${s.id}`}>Cancel</Button>
-                      <Button onClick={saveEditSys} className="bg-[#09090B] text-white rounded-none h-9" data-testid={`save-edit-sys-${s.id}`}>
-                        <Save className="h-4 w-4 mr-1" /> Save
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex flex-wrap gap-1.5">
-                    {s.sizes.map((v) => (
-                      <span key={v} className="text-xs px-2 py-1 border border-[#E4E4E7] bg-white font-mono-label">{v}</span>
-                    ))}
-                  </div>
-                )}
-              </CollapsibleBox>
-            ))}
-          </div>
         </div>
       </section>
         </TabsContent>
@@ -959,7 +975,17 @@ function EquipmentTaxonomySection() {
   };
 
   return (
-    <div className="space-y-10" data-testid="equipment-taxonomy">
+    <div className="space-y-4" data-testid="equipment-taxonomy">
+      <Tabs defaultValue="taxonomy" data-testid="equipment-subtabs">
+        <TabsList className="rounded-none border border-[#E4E4E7] p-0 h-auto bg-white flex justify-start w-fit mb-6">
+          <TabsTrigger value="taxonomy" data-testid="equipment-subtab-taxonomy" className="rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-9 px-4 text-xs gap-1.5">
+            <Tag className="h-3 w-3" /> Categories
+          </TabsTrigger>
+          <TabsTrigger value="sorting" data-testid="equipment-subtab-sorting" className="rounded-none data-[state=active]:bg-[#09090B] data-[state=active]:text-white h-9 px-4 text-xs gap-1.5">
+            <Ruler className="h-3 w-3" /> Sorting Systems
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="taxonomy" data-testid="equipment-content-taxonomy">
       <section className="grid md:grid-cols-12 gap-8">
         <div className="md:col-span-4">
           <div className="eyebrow">EQUIPMENT / TAXONOMY</div>
@@ -996,7 +1022,8 @@ function EquipmentTaxonomySection() {
           </div>
         </div>
       </section>
-
+        </TabsContent>
+        <TabsContent value="sorting" data-testid="equipment-content-sorting">
       <section className="grid md:grid-cols-12 gap-8">
         <div className="md:col-span-4">
           <div className="eyebrow">EQUIPMENT / SORTING</div>
@@ -1054,6 +1081,8 @@ function EquipmentTaxonomySection() {
           </div>
         </div>
       </section>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
