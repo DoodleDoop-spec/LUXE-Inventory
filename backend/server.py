@@ -9,7 +9,7 @@ import secrets
 import requests
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timezone, timedelta
 from passlib.context import CryptContext
 
@@ -193,6 +193,7 @@ class CostumeUpdate(BaseModel):
     total_quantity_override: Optional[int] = None
     in_use_quantity: Optional[int] = None
     assigned_student_ids: Optional[List[str]] = None
+    assignments: Optional[List[Dict[str, str]]] = None  # [{student_id, size}]
 
 
 class FlagPayload(BaseModel):
@@ -258,19 +259,65 @@ class Costume(BaseModel):
     variant_label: str = ""
     in_use_quantity: int = 0
     assigned_student_ids: List[str] = Field(default_factory=list)
-    shortage: bool = False  # computed: in_use_quantity < len(assigned_student_ids)
+    assignments: List[Dict[str, str]] = Field(default_factory=list)  # [{student_id, size}]
+    shortage: bool = False  # computed: total assigned > available
+    shortage_details: List[Dict[str, Any]] = Field(default_factory=list)  # per-size shortages
+
+
+def _compute_shortage(doc: Dict) -> Tuple[bool, List[Dict[str, Any]]]:
+    """Return (any_shortage, per_size_details) for a costume.
+    Details is a list of {size, assigned, available, deficit} for any shortage.
+    Falls back to legacy total-qty vs headcount check when no per-size assignments exist."""
+    if not doc.get("in_use"):
+        return False, []
+    assignments = doc.get("assignments") or []
+    legacy_ids = doc.get("assigned_student_ids") or []
+    # Prefer per-size assignments when populated
+    if assignments:
+        per_size: Dict[str, int] = {}
+        for a in assignments:
+            per_size[a.get("size") or ""] = per_size.get(a.get("size") or "", 0) + 1
+        sizes = doc.get("sizes") or {}
+        details = []
+        any_short = False
+        for size_key, assigned in per_size.items():
+            if size_key == "":
+                # Unsized (legacy) — check against total in_use_quantity
+                available = int(doc.get("in_use_quantity") or 0)
+            else:
+                available = int(sizes.get(size_key) or 0)
+            if assigned > available:
+                any_short = True
+                details.append({
+                    "size": size_key or "(unsized)",
+                    "assigned": assigned,
+                    "available": available,
+                    "deficit": assigned - available,
+                })
+        return any_short, details
+    # Legacy fallback
+    assigned_count = len(legacy_ids)
+    available = int(doc.get("in_use_quantity") or 0)
+    if assigned_count > available:
+        return True, [{"size": "(any)", "assigned": assigned_count, "available": available, "deficit": assigned_count - available}]
+    return False, []
 
 
 def _apply_shortage(doc: Dict) -> Dict:
-    """Compute the shortage flag on a costume doc in-place and return it."""
+    """Compute the shortage flag on a costume doc in-place and return it.
+    Also normalizes `assignments` and derives `assigned_student_ids` for BC."""
     if not doc:
         return doc
-    if doc.get("in_use"):
-        assigned = doc.get("assigned_student_ids") or []
-        qty = int(doc.get("in_use_quantity") or 0)
-        doc["shortage"] = qty < len(assigned)
-    else:
-        doc["shortage"] = False
+    # Normalize: if assignments is populated, derive assigned_student_ids;
+    # if only legacy field is present, backfill empty-size assignments for BC.
+    assignments = doc.get("assignments") or []
+    if assignments:
+        doc["assigned_student_ids"] = [a.get("student_id") for a in assignments if a.get("student_id")]
+    elif doc.get("assigned_student_ids"):
+        doc["assignments"] = [{"student_id": sid, "size": ""} for sid in doc["assigned_student_ids"]]
+    short, details = _compute_shortage(doc)
+    doc["shortage"] = short
+    doc["shortage_details"] = details
     return doc
 
 
@@ -659,6 +706,7 @@ async def create_costume(payload: CostumeCreate):
         "in_use_since": now if payload.in_use else None,
         "in_use_quantity": max(0, min(int(payload.in_use_quantity or 0), int(total_qty))) if payload.in_use else 0,
         "assigned_student_ids": list(payload.assigned_student_ids or []) if payload.in_use else [],
+        "assignments": [{"student_id": sid, "size": ""} for sid in (payload.assigned_student_ids or [])] if payload.in_use else [],
         "current_show_id": current_show_id,
         "pinned": bool(payload.pinned),
         "group_id": payload.group_id,
@@ -705,6 +753,21 @@ async def update_costume(costume_id: str, payload: CostumeUpdate):
             updates["current_show_id"] = None
     if "size_notes" in updates:
         updates["size_notes"] = {str(k): str(v or "") for k, v in (updates["size_notes"] or {}).items()}
+    # Normalize assignments <-> assigned_student_ids
+    if "assignments" in updates:
+        norm = []
+        for a in (updates["assignments"] or []):
+            sid = (a.get("student_id") or "").strip() if isinstance(a, dict) else ""
+            if not sid:
+                continue
+            norm.append({"student_id": sid, "size": str((a.get("size") or "")).strip()})
+        updates["assignments"] = norm
+        # Derive assigned_student_ids for BC
+        updates["assigned_student_ids"] = [a["student_id"] for a in norm]
+    elif "assigned_student_ids" in updates:
+        # Legacy setter: backfill empty-size assignments
+        ids = updates["assigned_student_ids"] or []
+        updates["assignments"] = [{"student_id": sid, "size": ""} for sid in ids]
     if "keywords" in updates:
         updates["keywords"] = [k.strip() for k in (updates["keywords"] or []) if k and k.strip()]
     # Legacy field alias: sizing_system -> sorting_system
@@ -1450,6 +1513,88 @@ async def delete_show(show_id: str):
         )
     await db.shows.delete_one({"id": show_id})
     return {"ok": True}
+
+
+# --------- Live-show controls ---------
+MAX_LIVE_SHOWS = 3
+
+
+class ToggleLivePayload(BaseModel):
+    is_live: bool
+    swap_show_id: Optional[str] = None  # when going live and cap reached, deactivate this one
+
+
+@api_router.post("/shows/{show_id}/toggle-live")
+async def toggle_live(show_id: str, payload: ToggleLivePayload):
+    """Flip a show's Live status with the 3-show cap enforced.
+    Going live while 3 shows are already live returns 409 with the current
+    live shows list — the caller must retry with `swap_show_id` set.
+    Going off-live releases every attached costume from `in_use` and returns
+    the freed-costumes list so the caller can offer a quick-cleanup UI."""
+    doc = await db.shows.find_one({"id": show_id}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Show not found")
+    was_live = bool(doc.get("is_live", False))
+    now = _now_iso()
+    released: List[Dict] = []
+
+    if payload.is_live and not was_live:
+        # Enforce cap
+        live_docs = await db.shows.find({"is_live": True}, {"_id": 0}).to_list(50)
+        if len(live_docs) >= MAX_LIVE_SHOWS:
+            if not payload.swap_show_id:
+                raise HTTPException(
+                    status_code=409,
+                    detail={"reason": "live_cap_reached", "max": MAX_LIVE_SHOWS, "live_shows": live_docs},
+                )
+            # Deactivate the picked show first
+            swap = await db.shows.find_one({"id": payload.swap_show_id}, {"_id": 0})
+            if not swap or not swap.get("is_live"):
+                raise HTTPException(status_code=400, detail="swap_show_id must be a currently-live show")
+            await db.shows.update_one({"id": payload.swap_show_id}, {"$set": {"is_live": False}})
+            # Release costumes on the swapped-out show
+            released_swap = await db.costumes.find({"current_show_id": payload.swap_show_id}, {"_id": 0, "id": 1, "name": 1, "category": 1, "location": 1, "sub_location": 1, "image_id": 1}).to_list(500)
+            released.extend([{**r, "released_from_show": swap.get("name"), "released_from_show_id": payload.swap_show_id} for r in released_swap])
+            await db.costumes.update_many(
+                {"current_show_id": payload.swap_show_id},
+                {"$set": {"in_use": False, "in_use_since": None, "current_show_id": None, "in_use_note": "", "assignments": [], "assigned_student_ids": [], "in_use_quantity": 0, "updated_at": now}},
+            )
+        await db.shows.update_one({"id": show_id}, {"$set": {"is_live": True}})
+        await db.costumes.update_many(
+            {"shows.show_id": show_id},
+            {"$set": {"in_use": True, "in_use_since": now, "current_show_id": show_id, "updated_at": now}},
+        )
+    elif not payload.is_live and was_live:
+        await db.shows.update_one({"id": show_id}, {"$set": {"is_live": False}})
+        released_now = await db.costumes.find({"current_show_id": show_id}, {"_id": 0, "id": 1, "name": 1, "category": 1, "location": 1, "sub_location": 1, "image_id": 1}).to_list(500)
+        released.extend([{**r, "released_from_show": doc.get("name"), "released_from_show_id": show_id} for r in released_now])
+        await db.costumes.update_many(
+            {"current_show_id": show_id},
+            {"$set": {"in_use": False, "in_use_since": None, "current_show_id": None, "in_use_note": "", "assignments": [], "assigned_student_ids": [], "in_use_quantity": 0, "updated_at": now}},
+        )
+    # Return updated show + released list
+    updated = await db.shows.find_one({"id": show_id}, {"_id": 0})
+    updated.setdefault("is_live", False)
+    return {"show": updated, "released_costumes": released}
+
+
+class BulkDeleteCostumesPayload(BaseModel):
+    ids: List[str]
+
+
+@api_router.post("/costumes/bulk-delete")
+async def bulk_delete_costumes(payload: BulkDeleteCostumesPayload):
+    """Batch-delete costumes by id (used by the end-of-live cleanup modal)."""
+    ids = [i for i in (payload.ids or []) if i]
+    if not ids:
+        return {"deleted": 0}
+    for cid in ids:
+        try:
+            await _detach_item_from_all_maps(cid)
+        except Exception:
+            pass
+    res = await db.costumes.delete_many({"id": {"$in": ids}})
+    return {"deleted": res.deleted_count}
 
 
 # --------- Settings Routes ---------

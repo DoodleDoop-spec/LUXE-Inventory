@@ -1,7 +1,8 @@
 import { useEffect, useState, useMemo } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
-import { ArrowLeft, MapPin, Pencil, Trash2, Flag, StickyNote, Calendar, Tag, Sparkles, Users, ExternalLink, ShoppingBag } from "lucide-react";
+import { ArrowLeft, MapPin, Pencil, Trash2, Flag, StickyNote, Calendar, Tag, Users, ExternalLink, ShoppingBag } from "lucide-react";
+import HangerIcon from "@/components/HangerIcon";
 import { Button } from "@/components/ui/button";
 import CostumeFormDialog from "@/components/CostumeFormDialog";
 import { buildTimestampedUrl } from "@/lib/videoLink";
@@ -195,7 +196,7 @@ export default function CostumeDetail() {
               </div>
               {costume.creator && (
                 <div className="flex items-center gap-2" data-testid="detail-creator">
-                  <Sparkles className="h-4 w-4" />
+                  <HangerIcon className="h-4 w-4" />
                   <span>Creator: <span className="font-medium text-[#09090B]">{costume.creator}</span></span>
                 </div>
               )}
@@ -315,7 +316,7 @@ export default function CostumeDetail() {
           {costume.in_use && (
             <div className="border border-[#10B981] bg-[#ECFDF5] p-5" data-testid="detail-in-use-banner">
               <div className="flex items-start gap-3">
-                <Sparkles className="h-5 w-5 text-[#059669] mt-0.5 shrink-0" />
+                <HangerIcon className="h-5 w-5 text-[#059669] mt-0.5 shrink-0" />
                 <div className="flex-1">
                   <div className="eyebrow text-[#065F46]">CURRENTLY IN USE</div>
                   {costume.in_use_note ? (

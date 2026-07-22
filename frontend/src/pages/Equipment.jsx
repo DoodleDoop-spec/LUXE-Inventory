@@ -2,7 +2,8 @@ import { useEffect, useState, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useConfirm } from "@/components/ConfirmDialog";
-import { Wrench, Plus, Search, X, ChevronDown, ChevronRight, Flag, Sparkles, Pencil, Trash2, FileUp } from "lucide-react";
+import { Wrench, Plus, Search, X, ChevronDown, ChevronRight, Flag, Pencil, Trash2, FileUp } from "lucide-react";
+import HangerIcon from "@/components/HangerIcon";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -273,7 +274,7 @@ function EquipmentCard({ item, onEdit, onDelete, sortingSystems }) {
           <div className="absolute top-2 right-2 bg-[#EF4444] text-white p-1"><Flag className="h-3 w-3" fill="currentColor" /></div>
         )}
         {item.pinned && (
-          <div className="absolute top-2 left-2 bg-[#F59E0B] text-white p-1"><Sparkles className="h-3 w-3" fill="currentColor" /></div>
+          <div className="absolute top-2 left-2 bg-[#F59E0B] text-white p-1"><HangerIcon className="h-3 w-3" /></div>
         )}
         {item.in_use && (
           <div className="absolute bottom-2 left-2 right-2 bg-[#10B981]/90 text-white text-[10px] font-mono-label tracking-widest text-center py-0.5">IN USE</div>

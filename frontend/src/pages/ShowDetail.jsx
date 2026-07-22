@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useConfirm } from "@/components/ConfirmDialog";
-import { ArrowLeft, Film, Flag, Calendar, Plus, Search, X, ExternalLink, Pencil, Upload, Image as ImageIcon, Trash2, Printer } from "lucide-react";
+import { ArrowLeft, Film, Flag, Calendar, Plus, Search, X, ExternalLink, Pencil, Upload, Image as ImageIcon, Trash2, Printer, Users as UsersIcon, User as UserIcon, ArrowLeftRight, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,6 +21,8 @@ export default function ShowDetail() {
   const [show, setShow] = useState(null);
   const [costumes, setCostumes] = useState([]);
   const [allCostumes, setAllCostumes] = useState([]);
+  const [students, setStudents] = useState([]);
+  const [studentCategories, setStudentCategories] = useState([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerQ, setPickerQ] = useState("");
   const [pickerSelected, setPickerSelected] = useState({});
@@ -29,19 +31,25 @@ export default function ShowDetail() {
   const [editForm, setEditForm] = useState({ name: "", year: "", notes: "", show_link: "", image_id: null, is_live: false });
   const [editSaving, setEditSaving] = useState(false);
   const [editUploading, setEditUploading] = useState(false);
+  const [swapModal, setSwapModal] = useState(null);       // { liveShows }
+  const [cleanupModal, setCleanupModal] = useState(null); // { showName, released, picked }
 
   const load = async () => {
     try {
-      const [shows, cs, all] = await Promise.all([
+      const [shows, cs, all, st, cats] = await Promise.all([
         api.get("/shows"),
         api.get("/costumes", { params: { show_id: id } }),
         api.get("/costumes"),
+        api.get("/students").catch(() => ({ data: [] })),
+        api.get("/student-categories").catch(() => ({ data: [] })),
       ]);
       const s = shows.data.find((x) => x.id === id);
       if (!s) { toast.error("Show not found"); navigate("/shows"); return; }
       setShow(s);
       setCostumes(cs.data);
       setAllCostumes(all.data);
+      setStudents(st.data);
+      setStudentCategories(cats.data);
     } catch {
       toast.error("Failed to load show");
       navigate("/shows");
@@ -209,6 +217,25 @@ export default function ShowDetail() {
     }
   };
 
+  // Build per-student kanban columns from attached in-use costumes (must live BEFORE the early return)
+  const catsById = useMemo(() => Object.fromEntries((studentCategories || []).map((c) => [c.id, c])), [studentCategories]);
+  const kanban = useMemo(() => {
+    const perStudent = new Map();
+    for (const c of costumes) {
+      for (const a of (c.assignments || [])) {
+        if (!perStudent.has(a.student_id)) perStudent.set(a.student_id, []);
+        perStudent.get(a.student_id).push({ costume: c, assignment: a });
+      }
+    }
+    const columns = [];
+    for (const st of students) {
+      if (!perStudent.has(st.id)) continue;
+      columns.push({ student: st, entries: perStudent.get(st.id) });
+    }
+    columns.sort((a, b) => (a.student.last_name || "").localeCompare(b.student.last_name || ""));
+    return columns;
+  }, [costumes, students]);
+
   if (!show) return <div className="py-20 eyebrow">LOADING…</div>;
 
   const printManifest = () => {
@@ -218,6 +245,50 @@ export default function ShowDetail() {
       document.documentElement.classList.remove("printing-manifest");
     }, 50);
   };
+
+  const printRunSheet = () => {
+    document.documentElement.classList.add("printing-run-sheet");
+    setTimeout(() => {
+      window.print();
+      document.documentElement.classList.remove("printing-run-sheet");
+    }, 50);
+  };
+
+  const toggleLive = async (next, swapShowId = null) => {
+    try {
+      const r = await api.post(`/shows/${id}/toggle-live`, { is_live: next, swap_show_id: swapShowId });
+      toast.success(next ? "Show is live" : "Show archived");
+      const released = r.data.released_costumes || [];
+      await load();
+      if (released.length > 0) {
+        setCleanupModal({ showName: show?.name, released, picked: new Set() });
+      }
+      setSwapModal(null);
+    } catch (err) {
+      const detail = err.response?.data?.detail;
+      if (detail && typeof detail === "object" && detail.reason === "live_cap_reached") {
+        setSwapModal({ liveShows: detail.live_shows || [] });
+      } else {
+        toast.error((typeof detail === "string" && detail) || "Failed to update live status");
+      }
+    }
+  };
+
+  const runCleanupDelete = async () => {
+    const ids = Array.from(cleanupModal?.picked || []);
+    if (ids.length === 0) { setCleanupModal(null); return; }
+    try {
+      const r = await api.post("/costumes/bulk-delete", { ids });
+      toast.success(`Deleted ${r.data.deleted} costume${r.data.deleted === 1 ? "" : "s"}`);
+      await load();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || "Delete failed");
+    }
+    setCleanupModal(null);
+  };
+
+  // Build per-student kanban columns from attached in-use costumes
+  const shortages = costumes.filter((c) => c.shortage);
 
   return (
     <div className="space-y-10 show-detail-screen" data-testid="show-detail-page">
@@ -288,6 +359,38 @@ export default function ShowDetail() {
                 <Printer className="h-4 w-4 mr-1" /> Print manifest
               </Button>
             )}
+            {hasPerm("students.view") && kanban.length > 0 && (
+              <Button
+                type="button"
+                onClick={printRunSheet}
+                variant="outline"
+                data-testid="show-print-run-sheet-btn"
+                className="rounded-none border-[#09090B] h-10"
+              >
+                <Printer className="h-4 w-4 mr-1" /> Print run sheet
+              </Button>
+            )}
+            {hasPerm("shows.toggle_live") && (
+              show.is_live ? (
+                <Button
+                  type="button"
+                  onClick={() => toggleLive(false)}
+                  data-testid="show-end-live-btn"
+                  className="bg-[#EF4444] hover:bg-[#DC2626] text-white rounded-none h-10"
+                >
+                  End live
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  onClick={() => toggleLive(true)}
+                  data-testid="show-go-live-btn"
+                  className="bg-[#10B981] hover:bg-[#059669] text-white rounded-none h-10"
+                >
+                  <span className="w-1.5 h-1.5 bg-white rounded-full animate-pulse mr-2" /> Go live
+                </Button>
+              )
+            )}
             <Button
               type="button"
               onClick={openEdit}
@@ -308,10 +411,119 @@ export default function ShowDetail() {
             </Button>
           </div>
           <div className="text-sm text-[#71717A] mt-4 tabular-nums">
-            {originals.length} original · {additionals.length} additional · {costumes.length} total pieces
+            {originals.length} original · {additionals.length} additional · {costumes.length} total pieces · {kanban.length} student{kanban.length === 1 ? "" : "s"} assigned
           </div>
         </div>
       </div>
+
+      {/* Shortage banner (per-show) */}
+      {shortages.length > 0 && (
+        <div className="border border-[#EF4444] bg-[#FEF2F2] p-4" data-testid="show-shortage-banner">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-[#EF4444] shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <div className="eyebrow text-[#7F1D1D]">ASSIGNMENT ALERT · {shortages.length} SHORTAGE{shortages.length === 1 ? "" : "S"}</div>
+              <p className="text-sm text-[#7F1D1D] mt-1">
+                One or more costumes have more students assigned than pieces on hand. Add stock, reassign, or duplicate before showtime.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {shortages.map((c) => (
+                  <Link key={c.id} to={`/costume/${c.id}`} data-testid={`show-shortage-${c.id}`} className="inline-flex items-center gap-1 bg-white border border-[#EF4444] text-[#7F1D1D] px-2 py-0.5 text-xs hover:bg-[#FEE2E2]">
+                    <span className="font-medium">{c.name}</span>
+                    {(c.shortage_details || []).map((d, i) => (
+                      <span key={i} className="text-[10px] tabular-nums">
+                        {d.size} {d.assigned}/{d.available}
+                      </span>
+                    ))}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Wardrobe Kanban (per-show) */}
+      {kanban.length > 0 && (
+        <section data-testid="show-wardrobe-kanban">
+          <div className="eyebrow mb-4 flex items-center gap-2">
+            <UsersIcon className="h-3 w-3" /> WARDROBE · STUDENTS ({kanban.length})
+          </div>
+          <div className="flex gap-3 overflow-x-auto pb-2">
+            {kanban.map(({ student, entries }) => {
+              const cat = catsById[student.category_id];
+              return (
+                <div key={student.id} className="w-72 shrink-0 border border-[#E4E4E7] bg-white" data-testid={`kanban-col-${student.id}`}>
+                  <Link to={`/student/${student.id}`} className="block p-3 border-b border-[#E4E4E7] bg-[#FAFAFA] hover:bg-[#F4F4F5]">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 image-empty overflow-hidden shrink-0 flex items-center justify-center">
+                        {student.image_id ? (
+                          <img src={`${process.env.REACT_APP_BACKEND_URL}/api/images/${student.image_id}`} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <UserIcon className="h-4 w-4 text-[#A1A1AA]" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-[#09090B] truncate">
+                          {[student.first_name, student.last_name].filter(Boolean).join(" ")}
+                        </div>
+                        <div className="flex items-center gap-1 mt-0.5">
+                          {cat && (
+                            <span className="text-[9px] font-mono-label tracking-widest px-1" style={{ backgroundColor: `${cat.color}20`, color: cat.color }}>
+                              {cat.name}
+                            </span>
+                          )}
+                          <span className="text-[9px] font-mono-label tracking-widest text-[#71717A]">{entries.length} PIECE{entries.length === 1 ? "" : "S"}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </Link>
+                  <div className="p-2 space-y-1.5">
+                    {entries.map(({ costume, assignment }) => {
+                      const sys = costume.sorting_system || costume.sizing_system || "";
+                      const preferred = sys && student.sizes ? (student.sizes[sys] || "") : "";
+                      const mismatch = preferred && assignment.size && preferred.toLowerCase() !== assignment.size.toLowerCase();
+                      return (
+                        <Link
+                          to={`/costume/${costume.id}`}
+                          key={costume.id + assignment.size}
+                          data-testid={`kanban-piece-${student.id}-${costume.id}`}
+                          className={`block border p-2 hover:border-[#09090B] ${costume.shortage ? "border-[#EF4444] bg-[#FEF2F2]" : (mismatch ? "border-[#F59E0B] bg-[#FEF3C7]" : "border-[#E4E4E7] bg-white")}`}
+                        >
+                          <div className="flex items-start gap-2">
+                            <div className="w-9 h-9 image-empty overflow-hidden shrink-0 flex items-center justify-center">
+                              {costume.image_id ? (
+                                <img src={`${process.env.REACT_APP_BACKEND_URL}/api/images/${costume.image_id}`} alt="" className="w-full h-full object-cover" />
+                              ) : null}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="text-xs font-medium text-[#09090B] truncate">{costume.name}</div>
+                              <div className="text-[10px] text-[#71717A] truncate">{costume.category}</div>
+                              <div className="mt-1 flex items-center gap-1 flex-wrap">
+                                <span className={`text-[9px] font-mono-label tracking-widest px-1 border ${mismatch ? "border-[#F59E0B] text-[#78350F]" : "border-[#E4E4E7] text-[#52525B]"}`}>
+                                  {assignment.size ? `SIZE · ${assignment.size}` : "UNSIZED"}
+                                </span>
+                                {mismatch && (
+                                  <span className="text-[9px] font-mono-label text-[#78350F]" title={`Prefers ${preferred}`}>
+                                    ⚠ MISMATCH
+                                  </span>
+                                )}
+                                {costume.shortage && (
+                                  <span className="text-[9px] font-mono-label bg-[#EF4444] text-white px-1">SHORT</span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {[
         { title: "Originals", items: originals, testId: "originals-section" },
@@ -366,6 +578,95 @@ export default function ShowDetail() {
 
       {/* Printable show manifest — hidden on screen, only shown when window.print is triggered from Print manifest */}
       <ShowManifestSheet show={show} costumes={costumes} originals={originals} />
+
+      {/* Printable Wardrobe run sheet — one page per student */}
+      <PrintableRunSheet columns={kanban} show={show} catsById={catsById} />
+
+      {/* Live-cap swap modal */}
+      {swapModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" data-testid="show-live-swap-overlay">
+          <div className="bg-white w-full max-w-lg border border-[#09090B]">
+            <div className="p-5 border-b border-[#E4E4E7]">
+              <div className="eyebrow">MAX 3 LIVE SHOWS</div>
+              <h3 className="font-display text-xl font-semibold mt-1">Swap out a live show?</h3>
+              <p className="text-sm text-[#71717A] mt-2">
+                <b>{show?.name}</b> can't go live because 3 shows are already live. Pick one to end.
+              </p>
+            </div>
+            <div className="max-h-64 overflow-y-auto">
+              {swapModal.liveShows.map((ls) => (
+                <button key={ls.id} type="button" data-testid={`show-swap-choose-${ls.id}`}
+                  onClick={() => toggleLive(true, ls.id)}
+                  className="w-full flex items-center gap-3 px-5 py-3 border-b border-[#E4E4E7] hover:bg-[#FAFAFA] text-left">
+                  <ArrowLeftRight className="h-4 w-4 text-[#71717A] shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-[#09090B] truncate">{ls.name}</div>
+                    <div className="text-xs text-[#71717A]">{ls.year ?? "—"}</div>
+                  </div>
+                  <span className="text-[9px] font-mono-label tracking-widest bg-[#EF4444] text-white px-1.5 py-0.5">END</span>
+                </button>
+              ))}
+            </div>
+            <div className="p-3 border-t border-[#E4E4E7] bg-[#FAFAFA] flex justify-end">
+              <Button variant="outline" onClick={() => setSwapModal(null)} className="rounded-none h-9">Cancel</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* End-of-live cleanup modal */}
+      {cleanupModal && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" data-testid="show-cleanup-overlay">
+          <div className="bg-white w-full max-w-2xl max-h-[85vh] flex flex-col border border-[#09090B]">
+            <div className="p-5 border-b border-[#E4E4E7]">
+              <div className="eyebrow">SHOW ENDED · {cleanupModal.showName?.toUpperCase()}</div>
+              <h3 className="font-display text-xl font-semibold mt-1">Any costumes to remove from inventory?</h3>
+              <p className="text-sm text-[#71717A] mt-2">
+                These pieces are no longer in use. Check any that walked with a student (e.g. custom boots) and we'll delete them.
+              </p>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {cleanupModal.released.map((c) => {
+                const on = cleanupModal.picked.has(c.id);
+                return (
+                  <label key={c.id} className="flex items-center gap-3 px-5 py-2.5 border-b border-[#E4E4E7] cursor-pointer hover:bg-[#FAFAFA]" data-testid={`show-cleanup-item-${c.id}`}>
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      onChange={(e) => {
+                        const next = new Set(cleanupModal.picked);
+                        if (e.target.checked) next.add(c.id); else next.delete(c.id);
+                        setCleanupModal({ ...cleanupModal, picked: next });
+                      }}
+                      className="shrink-0"
+                    />
+                    <div className="w-8 h-8 image-empty overflow-hidden shrink-0 flex items-center justify-center">
+                      {c.image_id ? (
+                        <img src={`${process.env.REACT_APP_BACKEND_URL}/api/images/${c.image_id}`} alt="" className="w-full h-full object-cover" />
+                      ) : null}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-[#09090B] truncate">{c.name}</div>
+                      <div className="text-[11px] text-[#71717A] truncate">
+                        {c.category || "—"}{c.location ? ` · ${c.location}` : ""}{c.sub_location ? ` · ${c.sub_location}` : ""}
+                      </div>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+            <div className="p-3 border-t border-[#E4E4E7] bg-[#FAFAFA] flex justify-between items-center">
+              <span className="text-xs text-[#71717A] tabular-nums">{cleanupModal.picked.size} of {cleanupModal.released.length} selected</span>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => setCleanupModal(null)} className="rounded-none h-9">Keep all</Button>
+                <Button onClick={runCleanupDelete} disabled={cleanupModal.picked.size === 0} className="rounded-none h-9 bg-[#EF4444] hover:bg-[#DC2626] text-white disabled:opacity-40">
+                  Delete {cleanupModal.picked.size || ""}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Costume picker */}
       <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
@@ -629,3 +930,92 @@ function ShowManifestSheet({ show, costumes, originals }) {
   );
 }
 
+
+function PrintableRunSheet({ columns, show, catsById }) {
+  const printedAt = new Date().toLocaleString();
+  return (
+    <div className="wardrobe-print-only" data-testid="show-run-sheet" aria-hidden="true">
+      {columns.map(({ student, entries }) => {
+        const cat = catsById[student.category_id];
+        const fullName = [student.first_name, student.last_name].filter(Boolean).join(" ") || student.display_name || "Unnamed";
+        return (
+          <section key={student.id} className="run-sheet-page" data-testid={`show-run-sheet-page-${student.id}`}>
+            <header className="run-sheet-header">
+              <div className="run-sheet-eyebrow">
+                WARDROBE RUN SHEET · {(show?.name || "").toUpperCase()}{show?.year ? ` · ${show.year}` : ""}
+              </div>
+              <h1 className="run-sheet-title">{fullName}</h1>
+              <div className="run-sheet-meta">
+                {cat && <span className="run-sheet-tag" style={{ borderColor: cat.color, color: cat.color }}>{cat.name}</span>}
+                {student.grade && <span>Grade {student.grade}</span>}
+                {student.pronouns && <span>{student.pronouns}</span>}
+                <span className="run-sheet-count">{entries.length} PIECE{entries.length === 1 ? "" : "S"}</span>
+              </div>
+            </header>
+
+            {(student.sizes && Object.keys(student.sizes).some((k) => (student.sizes[k] || "").trim())) && (
+              <div className="run-sheet-sizes">
+                <div className="run-sheet-subtitle">SIZES</div>
+                <div className="run-sheet-size-grid">
+                  {Object.entries(student.sizes || {}).filter(([, v]) => (v || "").trim()).map(([k, v]) => (
+                    <div key={`s-${k}`} className="run-sheet-size-cell">
+                      <div className="run-sheet-size-label">{k}</div>
+                      <div className="run-sheet-size-val">{v}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="run-sheet-costumes">
+              <div className="run-sheet-subtitle">ASSIGNED COSTUMES</div>
+              {entries.map(({ costume, assignment }) => {
+                const sys = costume.sorting_system || costume.sizing_system || "";
+                const preferred = sys && student.sizes ? (student.sizes[sys] || "") : "";
+                const mismatch = preferred && assignment.size && preferred.toLowerCase() !== assignment.size.toLowerCase();
+                return (
+                  <div key={costume.id + assignment.size} className="run-sheet-costume">
+                    <div className="run-sheet-costume-img">
+                      {costume.image_id ? (
+                        <img src={`${process.env.REACT_APP_BACKEND_URL}/api/images/${costume.image_id}`} alt="" />
+                      ) : null}
+                    </div>
+                    <div className="run-sheet-costume-body">
+                      <div className="run-sheet-costume-name">
+                        {costume.name}
+                        {assignment.size ? <span className="run-sheet-size-badge">{assignment.size}</span> : null}
+                        {mismatch ? <span className="run-sheet-mismatch">⚠ mismatch · prefers {preferred}</span> : null}
+                      </div>
+                      <div className="run-sheet-costume-meta">
+                        {costume.category || "—"}
+                        {costume.subcategory ? ` · ${costume.subcategory}` : ""}
+                      </div>
+                      <div className="run-sheet-costume-loc">
+                        <b>Location:</b> {costume.location || "—"}{costume.sub_location ? ` · ${costume.sub_location}` : ""}
+                      </div>
+                      {costume.in_use_note && (
+                        <div className="run-sheet-costume-notes"><b>Notes:</b> {costume.in_use_note}</div>
+                      )}
+                    </div>
+                    <div className="run-sheet-costume-check">☐</div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {student.notes && (
+              <div className="run-sheet-student-notes">
+                <div className="run-sheet-subtitle">STUDENT NOTES</div>
+                <p>{student.notes}</p>
+              </div>
+            )}
+
+            <footer className="run-sheet-footer">
+              Printed {printedAt} · Dresser signature: _______________________
+            </footer>
+          </section>
+        );
+      })}
+    </div>
+  );
+}

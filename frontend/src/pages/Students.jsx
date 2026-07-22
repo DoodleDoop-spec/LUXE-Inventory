@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { usePrompt } from "@/components/PromptDialog";
@@ -740,10 +741,10 @@ function StudentCard({ student, category, onEdit, onDelete, onInvite }) {
           {category.name.toUpperCase()}
         </div>
       )}
-      <button
-        type="button"
-        onClick={onEdit}
+      <Link
+        to={`/student/${s.id}`}
         className="block w-full text-left"
+        data-testid={`student-open-${s.id}`}
       >
         <div className="aspect-square image-empty overflow-hidden mb-3 flex items-center justify-center">
           {s.image_id ? (
@@ -764,7 +765,7 @@ function StudentCard({ student, category, onEdit, onDelete, onInvite }) {
             </span>
           ))}
         </div>
-      </button>
+      </Link>
       <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         <button
           type="button"

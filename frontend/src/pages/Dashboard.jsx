@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useSettings } from "@/context/SettingsContext";
-import { Package, Tag, ArrowUpRight, Plus, Flag, Sparkles, Film, MapPin, Wrench, Boxes, Lock } from "lucide-react";
+import { Package, Tag, ArrowUpRight, Plus, Flag, Film, MapPin, Wrench, Boxes, Lock, Pin } from "lucide-react";
+import HangerIcon from "@/components/HangerIcon";
 import { Button } from "@/components/ui/button";
 import { getCostumeFlagColor } from "@/lib/flagColor";
 
@@ -51,7 +52,7 @@ export default function Dashboard() {
     { label: "Total Pieces", value: stats?.total_costumes ?? "—", icon: Package, testId: "stat-total-costumes", to: "/inventory" },
     { label: "Total Quantity", value: stats?.total_items ?? "—", icon: Boxes, testId: "stat-total-quantity", to: "/inventory" },
     { label: "Equipment", value: stats?.equipment_count ?? 0, icon: Wrench, testId: "stat-equipment", to: "/equipment" },
-    { label: "In Use", value: stats?.in_use_count ?? 0, icon: Sparkles, testId: "stat-in-use", accent: (stats?.in_use_count || 0) > 0 && hideInUseMode !== "hide_all", to: "/inventory", hidden: hideInUseMode === "hide_all" },
+    { label: "In Use", value: stats?.in_use_count ?? 0, icon: HangerIcon, testId: "stat-in-use", accent: (stats?.in_use_count || 0) > 0 && hideInUseMode !== "hide_all", to: "/inventory", hidden: hideInUseMode === "hide_all" },
     { label: "Categories", value: stats?.category_count ?? "—", icon: Tag, testId: "stat-categories", to: "/settings" },
     { label: "Storage Locations", value: stats?.total_locations ?? "—", icon: MapPin, testId: "stat-locations", to: "/locations" },
     { label: "Shows", value: stats?.total_shows ?? "—", icon: Film, testId: "stat-shows", to: "/shows" },
@@ -138,7 +139,7 @@ export default function Dashboard() {
         <section data-testid="in-use-section" className="border border-[#10B981] bg-[#ECFDF5]">
           <div className="p-5 md:p-6 border-b border-[#6EE7B7] flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <Sparkles className="h-5 w-5 text-[#059669]" />
+              <HangerIcon className="h-5 w-5 text-[#059669]" />
               <div>
                 <div className="eyebrow text-[#065F46]">CURRENTLY IN USE</div>
                 <h2 className="font-display text-lg font-semibold text-[#064E3B] mt-1">
@@ -161,7 +162,7 @@ export default function Dashboard() {
                     {c.image_id ? (
                       <img src={`${process.env.REACT_APP_BACKEND_URL}/api/images/${c.image_id}`} alt={c.name} className="w-full h-full object-cover" />
                     ) : (
-                      <Sparkles className="h-4 w-4 text-[#10B981]" />
+                      <HangerIcon className="h-4 w-4 text-[#10B981]" />
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
@@ -264,7 +265,7 @@ export default function Dashboard() {
                   )}
                   {c.pinned && (
                     <div className="absolute top-2 left-2 bg-[#F59E0B] text-white p-1" title="Pinned">
-                      <Sparkles className="h-3 w-3" fill="currentColor" />
+                      <Pin className="h-3 w-3" fill="currentColor" />
                     </div>
                   )}
                   {showInUseMarkers && c.in_use && (

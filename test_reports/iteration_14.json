@@ -1,0 +1,35 @@
+{
+  "summary": "Iteration 24 (LUXE-Inventory: size-based assignments, live-cap swap, bulk-delete, /shows merger, /student/:id, Sparkles→Hanger). Backend 8/8 pytest green. Frontend: /wardrobe→/shows redirect OK; nav-wardrobe removed; year sections COLLAPSED by default (chevron-right); live-shows-section + LiveShowCard + Kanban render when a show is live; ShowDetail has show-print-manifest-btn, show-end-live-btn, LIVE badge; StudentDetail (/student/:id) renders student-detail-page + student-sizes + student-assignments. Found + fixed 1 critical regression: Dashboard.jsx used `Sparkles` icon without importing it → 'Sparkles is not defined' runtime error crashing entire Dashboard route as soon as any pinned costume rendered. Replaced with Pin icon (better fit for the 'Pinned' marker tooltip).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration24.py",
+    "/app/test_reports/pytest/iter24_results.xml"
+  ],
+  "action_items": [
+    "Confirm the Sparkles→Pin substitution in Dashboard.jsx is the intended visual for the 'pinned' marker (Sparkles was called out for removal from the in-use marker only; the pinned marker was a separate use-site that the previous edit missed importing).",
+    "Consider org-scoping the /api/costumes/bulk-delete endpoint (currently deletes any id provided regardless of org) and requiring a permission like 'costumes.delete'.",
+    "server.py continues to grow (>4300 lines) — the new live-toggle + bulk-delete + shortage helpers are self-contained and would slot cleanly into a shows/costumes router split."
+  ],
+  "critical_code_review_comments": [
+    "Dashboard.jsx used `Sparkles` without importing it — direct copy-paste of a marker block from another file. Runtime crash 100% reproducible whenever a pinned costume is in the recent-costumes list. Fixed here by importing Pin from lucide-react.",
+    "POST /api/costumes/bulk-delete has NO auth/permission gating and NO org scoping — any authenticated user can nuke any costume across any org by knowing its id. Consider `require_permission('costumes.delete')` + org filter.",
+    "toggle-live releases costumes across ALL orgs when swap_show_id is supplied — same org-scoping gap as bulk-delete.",
+    "_compute_shortage treats a size key of '' as legacy fallback against in_use_quantity, but if a costume has BOTH sized and unsized assignments, only the unsized ones contribute to the '(unsized)' bucket while the sized ones may still be over-assigned — edge case worth a unit test."
+  ],
+  "updated_files": [
+    "/app/frontend/src/pages/Dashboard.jsx",
+    "/app/backend/tests/test_iteration24.py"
+  ],
+  "success_rate": {"backend": "8/8 (100%)", "frontend": "10/10 selectors verified"},
+  "test_credentials": "admin@luxe.test / LuxeAdmin!23",
+  "seed_data_creation": "Pytest creates TEST24_* students/costumes/shows and cleans them up in module teardown. UI smoke test made E2E Test Show (2cf7201e-4bda-46ef-8bae-373b06594053) live temporarily and toggled it back off — no residual state.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteration 24 verified. Backend pytest: /app/backend/tests/test_iteration24.py (8 tests, ~3s; run with -o addopts= to bypass xdist parallelism which conflicts with the 3-live-shows fixture). Frontend selectors confirmed present: nav-wardrobe REMOVED, /wardrobe→/shows redirect works, live-shows-section, live-show-card-{id}, live-student-{show}-{student}, toggle-year-{year} (collapsed by default), show-print-manifest-btn, show-print-run-sheet-btn (only when assignments exist), show-wardrobe-kanban (only when assignments exist), show-shortage-banner (only when shortage), show-end-live-btn, show-cleanup-overlay, show-live-swap-overlay, student-detail-page, student-sizes, student-assignments, student-costume-{id}, in-use-badge-{id} (HangerIcon inside). E2E Test Show 2025 has 2 attached costumes but 0 assigned students → run-sheet/kanban won't appear on its detail until assignments are set.",
+  "rca of the issue": "Dashboard.jsx line 268 rendered <Sparkles ... /> without importing Sparkles from lucide-react. Prior iteration removed the Sparkles import globally when replacing the in-use marker with HangerIcon, but a second Sparkles use-site (the 'pinned' marker) was overlooked. Any user with a pinned costume in their org's recent list would hit 'ReferenceError: Sparkles is not defined' and see the Uncaught runtime errors overlay covering the Dashboard. Fixed by importing Pin and swapping the icon."
+}

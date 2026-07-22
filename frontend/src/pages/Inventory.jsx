@@ -3,7 +3,8 @@ import { useLocation, useNavigate, Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { useSettings } from "@/context/SettingsContext";
-import { Plus, Search, LayoutGrid, List, X, MapPin, ChevronRight, ChevronDown, Flag, StickyNote, SlidersHorizontal, ArrowUpDown, Calendar, Image as ImageIcon, Package, Tag as TagIcon, Sparkles, AlertTriangle, FileUp } from "lucide-react";
+import { Plus, Search, LayoutGrid, List, X, MapPin, ChevronRight, ChevronDown, Flag, StickyNote, SlidersHorizontal, ArrowUpDown, Calendar, Image as ImageIcon, Package, Tag as TagIcon, AlertTriangle, FileUp } from "lucide-react";
+import HangerIcon from "@/components/HangerIcon";
 import { getCostumeFlagColor } from "@/lib/flagColor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -701,7 +702,7 @@ function CostumeCard({ costume, onEdit, onDelete, sizingSystems, showsById, cate
           )}
           {showInUseMarker && costume.in_use && (
             <div className="absolute top-2 left-2 bg-[#10B981] text-white px-2 py-1 flex items-center gap-1" data-testid={`in-use-badge-${costume.id}`}>
-              <Sparkles className="h-3 w-3" />
+              <HangerIcon className="h-3 w-3" />
               <span className="text-[10px] font-mono-label">IN USE</span>
             </div>
           )}

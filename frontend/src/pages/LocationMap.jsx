@@ -422,10 +422,10 @@ function FloorplanEditor({ shapes, setShapes, tool, setTool, childLocations = []
   const addAt = (x, y) => {
     let shape;
     const idv = uuid();
-    if (tool === "rect") shape = { id: idv, type: "rect", x: x - 60, y: y - 30, width: 120, height: 60, label: "Rack", fill_color: "#DBEAFE", stroke_color: "#1D4ED8" };
-    else if (tool === "circle") shape = { id: idv, type: "circle", x: x - 30, y: y - 30, width: 60, height: 60, label: "", fill_color: "#FEE2E2", stroke_color: "#B91C1C" };
-    else if (tool === "line") shape = { id: idv, type: "line", x, y, width: 120, height: 0, label: "", fill_color: "transparent", stroke_color: "#09090B" };
-    else if (tool === "text") shape = { id: idv, type: "text", x, y, width: 120, height: 24, label: "Room label", fill_color: "transparent", stroke_color: "#09090B" };
+    if (tool === "rect") shape = { id: idv, type: "rect", x: x - 60, y: y - 30, width: 120, height: 60, label: "Rack", fill_color: "#E7EFF8", stroke_color: "#4A5D75" };
+    else if (tool === "circle") shape = { id: idv, type: "circle", x: x - 30, y: y - 30, width: 60, height: 60, label: "", fill_color: "#F5E6D6", stroke_color: "#8B6F4B" };
+    else if (tool === "line") shape = { id: idv, type: "line", x, y, width: 120, height: 0, label: "", fill_color: "transparent", stroke_color: "#3F3F46" };
+    else if (tool === "text") shape = { id: idv, type: "text", x, y, width: 120, height: 24, label: "Room label", fill_color: "transparent", stroke_color: "#3F3F46" };
     else return;
     setShapes([...shapes, shape]);
     setSelectedId(shape.id);
@@ -563,38 +563,50 @@ function FloorplanEditor({ shapes, setShapes, tool, setTool, childLocations = []
           <svg
             ref={svgRef}
             viewBox={`0 0 ${CANVAS_W} ${CANVAS_H}`}
-            className={`w-full h-auto border border-[#E4E4E7] bg-[#FAFAFA] ${editMode ? (tool === "select" ? "cursor-default" : "cursor-crosshair") : "cursor-pointer"}`}
+            className={`w-full h-auto border border-[#D4D4D8] shadow-inner ${editMode ? (tool === "select" ? "cursor-default" : "cursor-crosshair") : "cursor-pointer"}`}
+            style={{ background: "linear-gradient(180deg, #FAFAF7 0%, #F4F1EA 100%)" }}
             onClick={canvasClick}
             onMouseMove={onSvgMove}
             onMouseUp={endDrag}
             onMouseLeave={endDrag}
             data-testid="floorplan-canvas"
           >
-            {/* Grid */}
+            {/* Paper dot-grid */}
             <defs>
-              <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-                <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#E4E4E7" strokeWidth="1" />
+              <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
+                <circle cx="0.75" cy="0.75" r="0.75" fill="#C7C2B4" opacity="0.55" />
               </pattern>
+              <pattern id="grid-major" width="120" height="120" patternUnits="userSpaceOnUse">
+                <circle cx="1" cy="1" r="1.1" fill="#8A8578" opacity="0.6" />
+              </pattern>
+              <filter id="shape-shadow" x="-20%" y="-20%" width="140%" height="140%">
+                <feDropShadow dx="0" dy="1.5" stdDeviation="2" floodOpacity="0.10" />
+              </filter>
             </defs>
             <rect width={CANVAS_W} height={CANVAS_H} fill="url(#grid)" />
+            <rect width={CANVAS_W} height={CANVAS_H} fill="url(#grid-major)" />
 
             {shapes.map((s) => {
               const isSel = s.id === selectedId;
-              const strokeW = isSel ? 3 : 2;
-              const strokeCol = isSel ? "#09090B" : (s.stroke_color || "#09090B");
+              const strokeW = isSel ? 2.5 : 1.5;
+              const strokeCol = isSel ? "#09090B" : (s.stroke_color || "#52525B");
               if (s.type === "rect") {
                 return (
                   <g key={s.id} onMouseDown={(e) => startShapeDrag(s, "move", e)} data-testid={`shape-${s.id}`}
-                     onDoubleClick={() => { if (s.location_id) navigate(`/locations/${s.location_id}/map`); }}>
-                    <rect x={s.x} y={s.y} width={s.width} height={s.height} fill={s.fill_color || "#DBEAFE"} stroke={strokeCol} strokeWidth={strokeW} />
+                     onDoubleClick={() => { if (s.location_id) navigate(`/locations/${s.location_id}/map`); }}
+                     filter="url(#shape-shadow)">
+                    <rect x={s.x} y={s.y} width={s.width} height={s.height} rx={4} ry={4} fill={s.fill_color || "#F0F2F5"} stroke={strokeCol} strokeWidth={strokeW} />
                     {s.label && (
-                      <text x={s.x + s.width / 2} y={s.y + s.height / 2 + 5} textAnchor="middle" fill="#09090B" fontSize="14" fontWeight="500">{s.label}</text>
+                      <text x={s.x + s.width / 2} y={s.y + s.height / 2 + 5} textAnchor="middle" fill="#09090B" fontSize="13" fontWeight="500" style={{ letterSpacing: "0.02em" }}>{s.label}</text>
                     )}
                     {s.location_id && (
-                      <text x={s.x + s.width - 8} y={s.y + 14} textAnchor="end" fill="#3B82F6" fontSize="10" fontWeight="700">🔗</text>
+                      <g>
+                        <circle cx={s.x + s.width - 10} cy={s.y + 10} r="7" fill="#3B82F6" />
+                        <text x={s.x + s.width - 10} y={s.y + 13} textAnchor="middle" fill="white" fontSize="9" fontWeight="700">↗</text>
+                      </g>
                     )}
                     {isSel && (
-                      <rect x={s.x + s.width - 8} y={s.y + s.height - 8} width={16} height={16} fill="#09090B" style={{ cursor: "nwse-resize" }} onMouseDown={(e) => startShapeDrag(s, "resize", e)} />
+                      <rect x={s.x + s.width - 8} y={s.y + s.height - 8} width={16} height={16} rx={2} fill="#09090B" style={{ cursor: "nwse-resize" }} onMouseDown={(e) => startShapeDrag(s, "resize", e)} />
                     )}
                   </g>
                 );
@@ -606,11 +618,15 @@ function FloorplanEditor({ shapes, setShapes, tool, setTool, childLocations = []
                 const ry = s.height / 2;
                 return (
                   <g key={s.id} onMouseDown={(e) => startShapeDrag(s, "move", e)} data-testid={`shape-${s.id}`}
-                     onDoubleClick={() => { if (s.location_id) navigate(`/locations/${s.location_id}/map`); }}>
-                    <ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill={s.fill_color || "#FEE2E2"} stroke={strokeCol} strokeWidth={strokeW} />
-                    {s.label && <text x={cx} y={cy + 5} textAnchor="middle" fill="#09090B" fontSize="14">{s.label}</text>}
+                     onDoubleClick={() => { if (s.location_id) navigate(`/locations/${s.location_id}/map`); }}
+                     filter="url(#shape-shadow)">
+                    <ellipse cx={cx} cy={cy} rx={rx} ry={ry} fill={s.fill_color || "#FBE5D6"} stroke={strokeCol} strokeWidth={strokeW} />
+                    {s.label && <text x={cx} y={cy + 5} textAnchor="middle" fill="#09090B" fontSize="13" fontWeight="500">{s.label}</text>}
                     {s.location_id && (
-                      <text x={s.x + s.width - 8} y={s.y + 14} textAnchor="end" fill="#3B82F6" fontSize="10" fontWeight="700">🔗</text>
+                      <g>
+                        <circle cx={s.x + s.width - 10} cy={s.y + 10} r="7" fill="#3B82F6" />
+                        <text x={s.x + s.width - 10} y={s.y + 13} textAnchor="middle" fill="white" fontSize="9" fontWeight="700">↗</text>
+                      </g>
                     )}
                     {isSel && (
                       <rect x={s.x + s.width - 8} y={s.y + s.height - 8} width={16} height={16} fill="#09090B" style={{ cursor: "nwse-resize" }} onMouseDown={(e) => startShapeDrag(s, "resize", e)} />
