@@ -3,7 +3,7 @@ import { api } from "@/lib/api";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { usePrompt } from "@/components/PromptDialog";
 import {
-  Users, Plus, Search, Upload, Mail, MailCheck, X, Trash2, Pencil, User as UserIcon, Palette, Check,
+  Users, Plus, Search, Upload, Mail, MailCheck, X, Trash2, Pencil, User as UserIcon, Palette, Check, FileUp, Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,6 +41,8 @@ export default function Students() {
   const [config, setConfig] = useState({ measurement_keys: [], size_keys: [] });
   const [stats, setStats] = useState({ total: 0, invited: 0, with_email: 0, size_distribution: {} });
   const [q, setQ] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [sortBy, setSortBy] = useState("name");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState(null); // student id or null
   const [form, setForm] = useState(emptyForm);
@@ -73,12 +75,29 @@ export default function Students() {
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    if (!needle) return students;
-    return students.filter((s) =>
-      [s.first_name, s.last_name, s.display_name, s.email, s.grade]
-        .filter(Boolean).some((v) => v.toLowerCase().includes(needle))
-    );
-  }, [students, q]);
+    let list = students;
+    if (needle) {
+      list = list.filter((s) =>
+        [s.first_name, s.last_name, s.display_name, s.email, s.grade]
+          .filter(Boolean).some((v) => v.toLowerCase().includes(needle))
+      );
+    }
+    if (categoryFilter) {
+      list = categoryFilter === "__none__"
+        ? list.filter((s) => !s.category_id)
+        : list.filter((s) => s.category_id === categoryFilter);
+    }
+    const cmp = (a, b) => {
+      if (sortBy === "grade") return (a.grade || "").localeCompare(b.grade || "") || (a.last_name || "").localeCompare(b.last_name || "");
+      if (sortBy === "category") {
+        const an = (categories.find((c) => c.id === a.category_id) || {}).name || "";
+        const bn = (categories.find((c) => c.id === b.category_id) || {}).name || "";
+        return an.localeCompare(bn) || (a.last_name || "").localeCompare(b.last_name || "");
+      }
+      return (a.last_name || "").localeCompare(b.last_name || "") || (a.first_name || "").localeCompare(b.first_name || "");
+    };
+    return [...list].sort(cmp);
+  }, [students, q, categoryFilter, sortBy, categories]);
 
   const openNew = () => {
     setEditing(null);
@@ -223,6 +242,81 @@ export default function Students() {
     setInviteBusy(false);
   };
 
+  const downloadTemplate = () => {
+    const sysHeaders = sortingSystems.map((s) => `size:${s.name}`);
+    const measHeaders = ["m:Height", "m:Chest / Bust", "m:Waist", "m:Hips"];
+    const headers = ["first_name", "last_name", "email", "grade", "pronouns", "category_name", "notes", ...sysHeaders, ...measHeaders];
+    const example = ["Ava", "Chen", "ava@example.com", "10th", "she/her", categories[0]?.name || "", "Prefers matte fabrics"];
+    while (example.length < headers.length) example.push("");
+    const csv = [headers.join(","), example.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "students_template.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const parseCSV = (text) => {
+    // Minimal RFC-4180 parser: handles quoted fields, embedded commas + doubled quotes.
+    const rows = [];
+    let field = "", row = [], inQ = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (inQ) {
+        if (ch === '"') {
+          if (text[i + 1] === '"') { field += '"'; i++; } else { inQ = false; }
+        } else field += ch;
+      } else {
+        if (ch === '"') inQ = true;
+        else if (ch === ",") { row.push(field); field = ""; }
+        else if (ch === "\n") { row.push(field); rows.push(row); row = []; field = ""; }
+        else if (ch === "\r") { /* skip */ }
+        else field += ch;
+      }
+    }
+    if (field.length || row.length) { row.push(field); rows.push(row); }
+    return rows.filter((r) => r.some((c) => c && c.trim()));
+  };
+
+  const handleImport = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    try {
+      const text = await file.text();
+      const rows = parseCSV(text);
+      if (rows.length < 2) { toast.error("CSV is empty or missing rows"); return; }
+      const headers = rows[0].map((h) => h.trim());
+      const parsed = rows.slice(1).map((r) => {
+        const rec = { sizes: {}, measurements: {} };
+        headers.forEach((h, i) => {
+          const v = (r[i] || "").trim();
+          if (!h) return;
+          if (h.toLowerCase().startsWith("size:")) rec.sizes[h.slice(5).trim()] = v;
+          else if (h.toLowerCase().startsWith("m:")) rec.measurements[h.slice(2).trim()] = v;
+          else rec[h] = v;
+        });
+        return rec;
+      });
+      const doImport = async (dryRun) => {
+        const r = await api.post("/students/import", { rows: parsed, dry_run: dryRun });
+        return r.data;
+      };
+      const dry = await doImport(true);
+      const ok = window.confirm(
+        `Import preview:\n\n• ${dry.would_create} new students\n• ${dry.duplicates} duplicates (skipped)\n• ${dry.invalid} invalid rows (missing first name)\n\nProceed?`
+      );
+      if (!ok) return;
+      const res = await doImport(false);
+      toast.success(`Imported ${res.created} students${res.duplicates ? ` (${res.duplicates} duplicates skipped)` : ""}`);
+      load();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || err.message || "Import failed");
+    }
+  };
+
   // Overview: build a compact "roster grid" of student × size type
   const rosterSizeCols = useMemo(() => {
     // union of all size keys actually used, ordered by config.size_keys first
@@ -255,9 +349,31 @@ export default function Students() {
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Search students…"
-              className="pl-10 h-11 rounded-none border-[#E4E4E7] w-64"
+              className="pl-10 h-11 rounded-none border-[#E4E4E7] w-56"
             />
           </div>
+          <select
+            data-testid="students-filter-category"
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            className="h-11 border border-[#E4E4E7] rounded-none px-2 text-sm bg-white"
+          >
+            <option value="">All categories</option>
+            <option value="__none__">No category</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+          <select
+            data-testid="students-sort"
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            className="h-11 border border-[#E4E4E7] rounded-none px-2 text-sm bg-white"
+          >
+            <option value="name">Sort: Name</option>
+            <option value="grade">Sort: Grade</option>
+            <option value="category">Sort: Category</option>
+          </select>
           <Button
             onClick={() => setCatManagerOpen(true)}
             variant="outline"
@@ -266,6 +382,19 @@ export default function Students() {
           >
             <Palette className="h-4 w-4 mr-1" /> Categories
           </Button>
+          <input type="file" accept=".csv,text/csv" onChange={handleImport} className="hidden" id="students-import-file" data-testid="students-import-file" />
+          <label htmlFor="students-import-file" className="cursor-pointer inline-flex items-center gap-1 border border-[#E4E4E7] hover:border-[#09090B] h-11 px-4 text-sm">
+            <FileUp className="h-4 w-4" /> Import CSV
+          </label>
+          <button
+            type="button"
+            onClick={downloadTemplate}
+            data-testid="students-template-btn"
+            className="inline-flex items-center gap-1 h-11 px-2 text-xs text-[#71717A] hover:text-[#09090B]"
+            title="Download CSV template"
+          >
+            <Download className="h-3.5 w-3.5" />
+          </button>
           <Button onClick={openNew} data-testid="students-new-btn" className="bg-[#09090B] hover:bg-[#27272A] text-white rounded-none h-11 px-5">
             <Plus className="h-4 w-4 mr-1" /> Add student
           </Button>

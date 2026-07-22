@@ -1,7 +1,7 @@
 import { Outlet, NavLink, Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect, useRef } from "react";
 import { useSettings } from "@/context/SettingsContext";
-import { LayoutDashboard, Package, MapPin, Settings as SettingsIcon, Search, X, Film, Flag, Menu, Wrench, Users, LogOut, User as UserIcon } from "lucide-react";
+import { LayoutDashboard, Package, MapPin, Settings as SettingsIcon, Search, X, Film, Flag, Menu, Wrench, Users, LogOut, User as UserIcon, Shirt } from "lucide-react";
 import HangerIcon from "@/components/HangerIcon";
 import { useAuth } from "@/context/AuthContext";
 
@@ -10,6 +10,7 @@ const navItems = [
   { to: "/inventory", label: "Costumes", icon: HangerIcon, testId: "nav-inventory", perm: "costumes.view" },
   { to: "/equipment", label: "Equipment", icon: Wrench, testId: "nav-equipment", perm: "equipment.view" },
   { to: "/students", label: "Students", icon: Users, testId: "nav-students", perm: "students.view" },
+  { to: "/wardrobe", label: "Wardrobe", icon: Shirt, testId: "nav-wardrobe", perm: "costumes.view" },
   { to: "/shows", label: "Shows", icon: Film, testId: "nav-shows", perm: "shows.view" },
   { to: "/locations", label: "Storage", icon: MapPin, testId: "nav-locations", perm: "locations.view" },
   { to: "/flags", label: "Flags", icon: Flag, testId: "nav-flags", perm: "flags.view" },

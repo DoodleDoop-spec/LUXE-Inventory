@@ -2575,6 +2575,88 @@ async def delete_student_category(cat_id: str):
     return {"ok": True}
 
 
+class StudentImportRow(BaseModel):
+    first_name: str
+    last_name: Optional[str] = ""
+    email: Optional[str] = ""
+    grade: Optional[str] = ""
+    pronouns: Optional[str] = ""
+    notes: Optional[str] = ""
+    category_name: Optional[str] = ""  # matched by name (case-insensitive)
+    sizes: Optional[Dict[str, str]] = None
+    measurements: Optional[Dict[str, str]] = None
+
+
+class StudentImportPayload(BaseModel):
+    rows: List[StudentImportRow]
+    dry_run: Optional[bool] = False
+
+
+@api_router.post("/students/import")
+async def import_students(payload: StudentImportPayload, request: Request):
+    """Bulk-create students from a parsed CSV. Skips rows missing first_name;
+    de-dupes by (first_name+last_name) case-insensitive so re-uploads are safe.
+    Returns a summary with created / skipped / duplicates counts.
+    """
+    now = _now_iso()
+    # Preload existing full-name index to catch dupes
+    existing = await db.students.find({}, {"_id": 0, "first_name": 1, "last_name": 1}).to_list(5000)
+    ex_names = {((r.get("first_name") or "").strip().lower(), (r.get("last_name") or "").strip().lower()) for r in existing}
+    # Preload categories to match category_name -> id (org-scoped-ish is fine here)
+    cats = await db.student_categories.find({}, {"_id": 0, "id": 1, "name": 1}).to_list(500)
+    cat_by_name = {c["name"].lower(): c["id"] for c in cats}
+    created, skipped, duplicates, invalid = 0, 0, 0, 0
+    preview: List[Dict[str, str]] = []
+    for row in payload.rows:
+        fn = (row.first_name or "").strip()
+        if not fn:
+            invalid += 1
+            continue
+        ln = (row.last_name or "").strip()
+        key = (fn.lower(), ln.lower())
+        if key in ex_names:
+            duplicates += 1
+            continue
+        cat_id = None
+        if row.category_name:
+            cat_id = cat_by_name.get(row.category_name.strip().lower())
+        doc = {
+            "id": str(uuid.uuid4()),
+            "first_name": fn,
+            "last_name": ln,
+            "display_name": "",
+            "image_id": None,
+            "email": (row.email or "").strip().lower(),
+            "phone": "",
+            "grade": (row.grade or "").strip(),
+            "pronouns": (row.pronouns or "").strip(),
+            "notes": (row.notes or "").strip(),
+            "category_id": cat_id,
+            "measurements": _clean_dict_str(row.measurements),
+            "sizes": _clean_dict_str(row.sizes),
+            "invited": False,
+            "invited_at": None,
+            "user_id": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+        if payload.dry_run:
+            preview.append({"first_name": fn, "last_name": ln, "category_id": cat_id or ""})
+        else:
+            await db.students.insert_one(doc)
+        ex_names.add(key)
+        created += 1
+        skipped = duplicates + invalid
+    return {
+        "dry_run": bool(payload.dry_run),
+        "created": created if not payload.dry_run else 0,
+        "would_create": created if payload.dry_run else 0,
+        "duplicates": duplicates,
+        "invalid": invalid,
+        "preview": preview if payload.dry_run else [],
+    }
+
+
 # ==================== END STUDENT CATEGORIES ====================
 
 

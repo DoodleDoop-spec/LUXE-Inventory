@@ -14,6 +14,7 @@ import Flags from "@/pages/Flags";
 import Equipment from "@/pages/Equipment";
 import LocationMap from "@/pages/LocationMap";
 import Students from "@/pages/Students";
+import Wardrobe from "@/pages/Wardrobe";
 import Login from "@/pages/Login";
 import AuthCallback from "@/pages/AuthCallback";
 import Onboarding from "@/pages/Onboarding";
@@ -72,6 +73,7 @@ function AppRouter() {
         <Route path="/inventory" element={<Inventory />} />
         <Route path="/equipment" element={<Equipment />} />
         <Route path="/students" element={<Students />} />
+        <Route path="/wardrobe" element={<Wardrobe />} />
         <Route path="/costume/:id" element={<CostumeDetail />} />
         <Route path="/locations" element={<Locations />} />
         <Route path="/locations/:id/map" element={<LocationMap />} />
