@@ -6,7 +6,7 @@ import HangerIcon from "@/components/HangerIcon";
 import { useAuth } from "@/context/AuthContext";
 
 const navItems = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard, testId: "nav-dashboard" },
+  { to: "/", label: "Dash", icon: LayoutDashboard, testId: "nav-dashboard" },
   { to: "/inventory", label: "Costumes", icon: HangerIcon, testId: "nav-inventory" },
   { to: "/equipment", label: "Equipment", icon: Wrench, testId: "nav-equipment" },
   { to: "/students", label: "Students", icon: Users, testId: "nav-students" },
@@ -115,7 +115,7 @@ export default function Layout() {
                 </button>
               )}
 
-              <nav className="hidden md:flex items-center gap-1" data-testid="main-nav">
+              <nav className="hidden md:flex items-center gap-0.5" data-testid="main-nav">
                 {navItems.map(({ to, label, icon: Icon, testId }) => {
                   const active = to === "/" ? location.pathname === "/" : location.pathname.startsWith(to);
                   return (
@@ -123,13 +123,13 @@ export default function Layout() {
                       key={to}
                       to={to}
                       data-testid={testId}
-                      className={`flex items-center gap-2 px-3 lg:px-4 py-2 text-sm font-medium border ${
+                      className={`flex items-center gap-1.5 px-2 lg:px-2.5 py-1.5 text-[13px] font-medium border ${
                         active
                           ? "bg-[#09090B] text-white border-[#09090B]"
                           : "bg-white text-[#09090B] border-transparent hover:border-[#E4E4E7]"
                       }`}
                     >
-                      <Icon className="h-4 w-4" strokeWidth={2} />
+                      <Icon className="h-3.5 w-3.5" strokeWidth={2} />
                       <span className="hidden lg:inline">{label}</span>
                     </NavLink>
                   );

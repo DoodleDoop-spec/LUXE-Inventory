@@ -20,6 +20,7 @@ import Onboarding from "@/pages/Onboarding";
 import { SettingsProvider } from "@/context/SettingsContext";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { ConfirmProvider } from "@/components/ConfirmDialog";
+import { PromptProvider } from "@/components/PromptDialog";
 import ScrollToTop from "@/components/ScrollToTop";
 import { Loader2 } from "lucide-react";
 
@@ -90,11 +91,13 @@ function App() {
       <AuthProvider>
         <SettingsProvider>
           <ConfirmProvider>
-            <BrowserRouter>
-              <ScrollToTop />
-              <AppRouter />
-            </BrowserRouter>
-            <Toaster position="top-right" richColors />
+            <PromptProvider>
+              <BrowserRouter>
+                <ScrollToTop />
+                <AppRouter />
+              </BrowserRouter>
+              <Toaster position="top-right" richColors />
+            </PromptProvider>
           </ConfirmProvider>
         </SettingsProvider>
       </AuthProvider>

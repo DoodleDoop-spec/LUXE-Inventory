@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useConfirm } from "@/components/ConfirmDialog";
 import {
-  ShieldCheck, Plus, Trash2, RotateCcw, Copy, Check, X as XIcon, Info,
+  ShieldCheck, Plus, Trash2, RotateCcw, Copy, Check, X as XIcon, Info, ChevronDown, ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,6 +20,7 @@ export default function RolesSettings() {
   const [selectedRoleId, setSelectedRoleId] = useState(null);
   const [draftPerms, setDraftPerms] = useState({}); // by roleId -> { perm_key: bool }
   const [saving, setSaving] = useState(false);
+  const [openGroups, setOpenGroups] = useState({}); // { groupName: true } — collapsed by default
   const [newDialogOpen, setNewDialogOpen] = useState(false);
   const [newRole, setNewRole] = useState({ name: "", description: "", clone_from: "" });
 
@@ -32,6 +33,9 @@ export default function RolesSettings() {
     } catch { toast.error("Failed to load roles"); }
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+  // Collapse every group by default whenever a new role is selected.
+  useEffect(() => { setOpenGroups({}); }, [selectedRoleId]);
 
   const selectedRole = useMemo(() => roles.find((r) => r.id === selectedRoleId) || null, [roles, selectedRoleId]);
   const currentPerms = useMemo(() => {
@@ -236,10 +240,29 @@ export default function RolesSettings() {
               const groupKeys = perms.map((p) => p.key);
               const allOn = groupKeys.every((k) => currentPerms[k]);
               const noneOn = groupKeys.every((k) => !currentPerms[k]);
+              const grantedInGroup = groupKeys.filter((k) => currentPerms[k]).length;
+              const isOpen = !!openGroups[group];
+              const changedCount = groupKeys.filter((k) => (draftPerms[selectedRole.id] || {})[k] !== undefined).length;
               return (
                 <div key={group} className="border border-[#E4E4E7] bg-white" data-testid={`perm-group-${group.replace(/\W+/g, "-")}`}>
-                  <div className="flex items-center justify-between px-4 py-2 border-b border-[#E4E4E7] bg-[#FAFAFA]">
-                    <div className="font-mono-label text-[10px] tracking-widest text-[#71717A]">{group.toUpperCase()}</div>
+                  <div className="flex items-center gap-2 px-2 py-2 border-b border-[#E4E4E7] bg-[#FAFAFA]">
+                    <button
+                      type="button"
+                      onClick={() => setOpenGroups((prev) => ({ ...prev, [group]: !prev[group] }))}
+                      data-testid={`perm-group-toggle-${group.replace(/\W+/g, "-")}`}
+                      className="flex-1 flex items-center gap-2 text-left"
+                    >
+                      {isOpen ? <ChevronDown className="h-3.5 w-3.5 text-[#71717A]" /> : <ChevronRight className="h-3.5 w-3.5 text-[#71717A]" />}
+                      <span className="font-mono-label text-[10px] tracking-widest text-[#71717A]">{group.toUpperCase()}</span>
+                      <span className="text-[10px] font-mono-label text-[#A1A1AA] tabular-nums">
+                        {grantedInGroup}/{groupKeys.length}
+                      </span>
+                      {changedCount > 0 && (
+                        <span className="text-[9px] font-mono-label text-[#EA580C] border border-[#EA580C] px-1">
+                          {changedCount} CHANGED
+                        </span>
+                      )}
+                    </button>
                     <div className="flex items-center gap-1 text-xs">
                       <button
                         type="button"
@@ -259,31 +282,33 @@ export default function RolesSettings() {
                       </button>
                     </div>
                   </div>
-                  <ul className="divide-y divide-[#F4F4F5]">
-                    {perms.map((p) => {
-                      const on = !!currentPerms[p.key];
-                      const changed = draftPerms[selectedRole.id]?.[p.key] !== undefined;
-                      return (
-                        <li key={p.key} className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#FAFAFA]">
-                          <button
-                            type="button"
-                            role="switch"
-                            aria-checked={on}
-                            onClick={() => togglePerm(p.key)}
-                            data-testid={`perm-toggle-${p.key}`}
-                            className={`shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${on ? "bg-[#10B981]" : "bg-[#D4D4D8]"}`}
-                          >
-                            <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${on ? "translate-x-4" : "translate-x-0.5"}`} />
-                          </button>
-                          <div className="flex-1 min-w-0">
-                            <div className="text-sm text-[#09090B]">{p.label}</div>
-                            <div className="text-[10px] font-mono-label text-[#A1A1AA]">{p.key}</div>
-                          </div>
-                          {changed && <span className="text-[9px] font-mono-label text-[#EA580C] border border-[#EA580C] px-1">CHANGED</span>}
-                        </li>
-                      );
-                    })}
-                  </ul>
+                  {isOpen && (
+                    <ul className="divide-y divide-[#F4F4F5]">
+                      {perms.map((p) => {
+                        const on = !!currentPerms[p.key];
+                        const changed = draftPerms[selectedRole.id]?.[p.key] !== undefined;
+                        return (
+                          <li key={p.key} className="flex items-center gap-3 px-4 py-2.5 hover:bg-[#FAFAFA]">
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={on}
+                              onClick={() => togglePerm(p.key)}
+                              data-testid={`perm-toggle-${p.key}`}
+                              className={`shrink-0 relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${on ? "bg-[#10B981]" : "bg-[#D4D4D8]"}`}
+                            >
+                              <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${on ? "translate-x-4" : "translate-x-0.5"}`} />
+                            </button>
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm text-[#09090B]">{p.label}</div>
+                              <div className="text-[10px] font-mono-label text-[#A1A1AA]">{p.key}</div>
+                            </div>
+                            {changed && <span className="text-[9px] font-mono-label text-[#EA580C] border border-[#EA580C] px-1">CHANGED</span>}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
                 </div>
               );
             })}

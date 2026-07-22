@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { api } from "@/lib/api";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { ArrowLeft, Package, Pencil, Trash2, MapPin, Tag, Flag, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -8,6 +9,7 @@ import { toast } from "sonner";
 export default function GroupDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const [group, setGroup] = useState(null);
 
   const fetchGroup = async () => {
@@ -23,7 +25,13 @@ export default function GroupDetail() {
   useEffect(() => { fetchGroup(); /* eslint-disable-next-line */ }, [id]);
 
   const handleDelete = async () => {
-    if (!window.confirm("Delete this group? Variants will be un-grouped, not deleted.")) return;
+    const ok = await confirm({
+      title: "Delete this group?",
+      description: "Variants will be un-grouped, not deleted.",
+      confirmLabel: "Delete group",
+      danger: true,
+    });
+    if (!ok) return;
     await api.delete(`/groups/${id}`);
     toast.success("Group deleted");
     navigate("/inventory");

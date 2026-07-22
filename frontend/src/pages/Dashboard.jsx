@@ -4,6 +4,7 @@ import { api } from "@/lib/api";
 import { useSettings } from "@/context/SettingsContext";
 import { Package, Tag, ArrowUpRight, Plus, Flag, Sparkles, Film, MapPin, Wrench, Boxes, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { getCostumeFlagColor } from "@/lib/flagColor";
 
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
@@ -12,6 +13,7 @@ export default function Dashboard() {
   const [flagged, setFlagged] = useState([]);
   const [inUse, setInUse] = useState([]);
   const [showsById, setShowsById] = useState({});
+  const [flagCatById, setFlagCatById] = useState({});
   const { settings } = useSettings();
   const orgName = (settings.org_name || "LUXE").trim() || "LUXE";
   const hideInUseMode = settings.hide_in_use_mode || "full";
@@ -20,13 +22,14 @@ export default function Dashboard() {
 
   const load = async () => {
     try {
-      const [s, r, p, f, iu, sh] = await Promise.all([
+      const [s, r, p, f, iu, sh, fc] = await Promise.all([
         api.get("/stats"),
         api.get("/costumes", { params: { sort: "origin_year_desc" } }),
         api.get("/pinned"),
         api.get("/flagged"),
         api.get("/in-use"),
         api.get("/shows"),
+        api.get("/flag-categories"),
       ]);
       setStats(s.data);
       setRecent(r.data.slice(0, 8));
@@ -36,6 +39,9 @@ export default function Dashboard() {
       const m = {};
       for (const x of sh.data) m[x.id] = x;
       setShowsById(m);
+      const fcm = {};
+      for (const c of fc.data) fcm[c.id] = c;
+      setFlagCatById(fcm);
     } catch (e) { console.error(e); }
   };
 
@@ -175,35 +181,44 @@ export default function Dashboard() {
       )}
 
       {showFlagBanner && flagged.length > 0 && (
-        <section data-testid="flagged-section" className="border border-[#EF4444] bg-[#FEF2F2]">
-          <div className="p-5 md:p-6 border-b border-[#FCA5A5] flex items-center justify-between">
+        <section data-testid="flagged-section" className="border border-[#E4E4E7] bg-white">
+          <div className="p-5 md:p-6 border-b border-[#E4E4E7] flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <Flag className="h-5 w-5 text-[#EF4444]" fill="currentColor" />
+              <Flag className="h-5 w-5 text-[#71717A]" strokeWidth={1.75} />
               <div>
-                <div className="eyebrow text-[#B91C1C]">FLAGGED / ATTENTION</div>
-                <h2 className="font-display text-lg font-semibold text-[#7F1D1D] mt-1">
+                <div className="eyebrow text-[#71717A]">FLAGGED / ATTENTION</div>
+                <h2 className="font-display text-lg font-semibold text-[#09090B] mt-1">
                   {flagged.length} flagged {flagged.length === 1 ? "costume" : "costumes"}
                 </h2>
               </div>
             </div>
           </div>
-          <div className="divide-y divide-[#FCA5A5]">
-            {flagged.map((c) => (
-              <Link
-                key={c.id}
-                to={`/costume/${c.id}`}
-                data-testid={`flagged-${c.id}`}
-                className="flex items-center justify-between px-5 md:px-6 py-3 hover:bg-[#FEE2E2]"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="font-medium text-[#7F1D1D] truncate">{c.name}</div>
-                  <div className="text-xs text-[#B91C1C] truncate">{c.flag_reason || "No reason given"}</div>
-                </div>
-                <div className="text-xs text-[#B91C1C] shrink-0 ml-4 hidden sm:block">
-                  {c.location}{c.sub_location ? ` · ${c.sub_location}` : ""}
-                </div>
-              </Link>
-            ))}
+          <div className="divide-y divide-[#F4F4F5]">
+            {flagged.map((c) => {
+              const flagColor = getCostumeFlagColor(c, flagCatById);
+              return (
+                <Link
+                  key={c.id}
+                  to={`/costume/${c.id}`}
+                  data-testid={`flagged-${c.id}`}
+                  className="flex items-center gap-3 px-5 md:px-6 py-3 hover:bg-[#FAFAFA]"
+                >
+                  <span
+                    className="w-1.5 self-stretch shrink-0"
+                    style={{ backgroundColor: flagColor }}
+                    aria-hidden="true"
+                  />
+                  <Flag className="h-4 w-4 shrink-0" fill="currentColor" style={{ color: flagColor }} />
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium text-[#09090B] truncate">{c.name}</div>
+                    <div className="text-xs text-[#71717A] truncate">{c.flag_reason || "No reason given"}</div>
+                  </div>
+                  <div className="text-xs text-[#71717A] shrink-0 ml-4 hidden sm:block">
+                    {c.location}{c.sub_location ? ` · ${c.sub_location}` : ""}
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         </section>
       )}
@@ -243,7 +258,7 @@ export default function Dashboard() {
                     <img src={`${process.env.REACT_APP_BACKEND_URL}/api/images/${c.image_id}`} alt={c.name} className="w-full h-full object-cover" />
                   ) : null}
                   {c.is_flagged && (
-                    <div className="absolute top-2 right-2 bg-[#EF4444] text-white p-1">
+                    <div className="absolute top-2 right-2 text-white p-1" style={{ backgroundColor: getCostumeFlagColor(c, flagCatById) }}>
                       <Flag className="h-3 w-3" fill="currentColor" />
                     </div>
                   )}

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useConfirm } from "@/components/ConfirmDialog";
+import { usePrompt } from "@/components/PromptDialog";
 import {
   Users, Plus, Search, Upload, Mail, MailCheck, X, Trash2, Pencil, User as UserIcon,
 } from "lucide-react";
@@ -29,6 +30,7 @@ const emptyForm = {
 
 export default function Students() {
   const confirm = useConfirm();
+  const prompt = usePrompt();
   const [students, setStudents] = useState([]);
   const [config, setConfig] = useState({ measurement_keys: [], size_keys: [] });
   const [stats, setStats] = useState({ total: 0, invited: 0, with_email: 0, size_distribution: {} });
@@ -97,8 +99,16 @@ export default function Students() {
 
   const setMeasurement = (k, v) => setForm((prev) => ({ ...prev, measurements: { ...prev.measurements, [k]: v } }));
   const setSize = (k, v) => setForm((prev) => ({ ...prev, sizes: { ...prev.sizes, [k]: v } }));
-  const addCustomField = (kind) => {
-    const label = window.prompt(kind === "measurement" ? "Measurement name (e.g. Bicep)" : "Size name (e.g. Bra)");
+  const addCustomField = async (kind) => {
+    const label = await prompt({
+      title: kind === "measurement" ? "Add measurement" : "Add size type",
+      description: kind === "measurement"
+        ? "Give this new measurement a short label. Example: Bicep, Thigh, Head Circumference."
+        : "Give this new size type a short label. Example: Bra, Hat, Belt.",
+      label: kind === "measurement" ? "Measurement name" : "Size name",
+      placeholder: kind === "measurement" ? "e.g. Bicep" : "e.g. Bra",
+      confirmLabel: "Add",
+    });
     if (!label) return;
     const clean = label.trim();
     if (!clean) return;

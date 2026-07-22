@@ -4,6 +4,7 @@ import { api } from "@/lib/api";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { useSettings } from "@/context/SettingsContext";
 import { Plus, Search, LayoutGrid, List, X, MapPin, ChevronRight, ChevronDown, Flag, StickyNote, SlidersHorizontal, ArrowUpDown, Calendar, Image as ImageIcon, Package, Tag as TagIcon, Sparkles } from "lucide-react";
+import { getCostumeFlagColor } from "@/lib/flagColor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -46,6 +47,7 @@ export default function Inventory() {
   const [costumes, setCostumes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState([]);
+  const [flagCatById, setFlagCatById] = useState({});
   const [locations, setLocations] = useState([]);
   const [sizingSystems, setSizingSystems] = useState([]);
   const [shows, setShows] = useState([]);
@@ -113,13 +115,14 @@ export default function Inventory() {
       if (showFilter !== ALL) params.show_id = showFilter;
       if (flaggedOnly) params.flagged = true;
       params.sort = sort;
-      const [c, cats, locs, systems, sh, grs] = await Promise.all([
+      const [c, cats, locs, systems, sh, grs, fc] = await Promise.all([
         api.get("/costumes", { params }),
         api.get("/categories"),
         api.get("/locations"),
         api.get("/sizing-systems"),
         api.get("/shows"),
         api.get("/groups"),
+        api.get("/flag-categories"),
       ]);
       setCostumes(c.data);
       setCategories(cats.data);
@@ -127,6 +130,9 @@ export default function Inventory() {
       setSizingSystems(systems.data);
       setShows(sh.data);
       setGroups(grs.data);
+      const fcm = {};
+      for (const cat of fc.data) fcm[cat.id] = cat;
+      setFlagCatById(fcm);
     } catch (e) {
       console.error(e);
       toast.error("Failed to load inventory");
@@ -492,6 +498,7 @@ export default function Inventory() {
                             sizingSystems={sizingSystems}
                             showsById={showsById}
                             categories={categories}
+                            flagCatById={flagCatById}
                             showInUseMarker={showInUseMarker}
                             onDragStart={() => setDragging(c)}
                             onDragEnd={() => { setDragging(null); setDragOverTarget(null); }}
@@ -507,7 +514,7 @@ export default function Inventory() {
           );
         })()
       ) : (
-        <CostumeTable costumes={costumes} onEdit={handleEdit} onDelete={handleDelete} showsById={showsById} categories={categories} />
+        <CostumeTable costumes={costumes} onEdit={handleEdit} onDelete={handleDelete} showsById={showsById} categories={categories} flagCatById={flagCatById} />
       )}
 
       {/* Drag & drop dock */}
@@ -603,7 +610,8 @@ export default function Inventory() {
   );
 }
 
-function CostumeCard({ costume, onEdit, onDelete, sizingSystems, showsById, categories, showInUseMarker = true, onDragStart, onDragEnd, isDragging }) {
+function CostumeCard({ costume, onEdit, onDelete, sizingSystems, showsById, categories, flagCatById = {}, showInUseMarker = true, onDragStart, onDragEnd, isDragging }) {
+  const flagColor = getCostumeFlagColor(costume, flagCatById);
   const effectiveSys = costume.sorting_system || costume.sizing_system || "";
   const sys = effectiveSys ? sizingSystems.find((s) => s.name === effectiveSys) : null;
   const sizeKeys = sys?.sizes || Object.keys(costume.sizes || {});
@@ -629,7 +637,7 @@ function CostumeCard({ costume, onEdit, onDelete, sizingSystems, showsById, cate
             />
           ) : null}
           {costume.is_flagged && (
-            <div className="absolute top-2 right-2 bg-[#EF4444] text-white px-2 py-1 flex items-center gap-1" data-testid={`flag-badge-${costume.id}`}>
+            <div className="absolute top-2 right-2 text-white px-2 py-1 flex items-center gap-1" style={{ backgroundColor: flagColor }} data-testid={`flag-badge-${costume.id}`}>
               <Flag className="h-3 w-3" fill="currentColor" />
               <span className="text-[10px] font-mono-label">FLAGGED</span>
             </div>
@@ -744,7 +752,7 @@ function CostumeCard({ costume, onEdit, onDelete, sizingSystems, showsById, cate
   );
 }
 
-function CostumeTable({ costumes, onEdit, onDelete, showsById, categories }) {
+function CostumeTable({ costumes, onEdit, onDelete, showsById, categories, flagCatById = {} }) {
   const catById = useMemo(() => {
     const m = {};
     for (const c of (categories || [])) m[c.name] = c;
@@ -786,7 +794,7 @@ function CostumeTable({ costumes, onEdit, onDelete, showsById, categories }) {
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-2">
-                    {c.is_flagged && <Flag className="h-3 w-3 text-[#EF4444] shrink-0" fill="currentColor" />}
+                    {c.is_flagged && <Flag className="h-3 w-3 shrink-0" fill="currentColor" style={{ color: getCostumeFlagColor(c, flagCatById) }} />}
                     <Link to={`/costume/${c.id}`} className="font-medium text-[#09090B] hover:underline truncate">{c.name}</Link>
                   </div>
                 </td>

@@ -15,10 +15,10 @@ export default function HangerIcon({ className = "", strokeWidth = 2, ...props }
       className={className}
       {...props}
     >
-      {/* Hook */}
-      <path d="M12 6a2 2 0 1 1 2-2" />
-      {/* Bar */}
-      <path d="M21 17H3l9-6 9 6z" />
+      {/* Hook — a small loop that sits centred above the bar */}
+      <path d="M12 10.5V8a2.5 2.5 0 1 1 3-2.45" />
+      {/* Bar — spans nearly the full width so the icon reads at any size */}
+      <path d="M22 19H2l10-7 10 7z" />
     </svg>
   );
 }

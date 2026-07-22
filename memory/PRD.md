@@ -90,6 +90,14 @@ A proprietary internal tracking system for costumes/accessories with location tr
 - **Mobile polish** — hamburger nav on <md screens with a mobile drawer, responsive main content padding, collapsible search icon on all breakpoints.
 - **Deduplicated category dropdowns** — legacy duplicate-name categories no longer crash Radix Select.
 
+### Iteration 18 — Feb 2026 (Round A: UI polish)
+Quick UI polish batch ahead of the bigger permission-aware / import / director-handoff work:
+- **Nav shrunk + Dashboard → Dash** — main nav tab height and padding trimmed (`px-2.5 py-1.5`, gap `0.5`, `text-[13px]`, `h-3.5` icons). "Dashboard" label renamed to "Dash".
+- **HangerIcon fix** — redrawn to fill the 24-viewBox properly (hook centred, bar spans 2–22 x 12–19 y) so the Costumes tab icon no longer feels clipped at small sizes.
+- **Per-flag colored icons** — new `/lib/flagColor.js` helper picks the first attached flag category's color. Inventory grid + table + Dashboard costume tiles + Dashboard flagged section all render the Flag glyph tinted with that colour (plus a matching left stripe on each flagged row). No more universal red.
+- **In-app prompt dialog** — new `<PromptProvider>` + `usePrompt()` hook replaces every `window.prompt()` / `window.confirm()` in the app (Students "Add measurement/size", GroupDetail delete). Wired through `App.js` alongside `<ConfirmProvider>`.
+- **Collapsible role permission groups** — every permission group inside Settings › Roles is now a collapsible box (collapsed by default). Group header shows granted/total count and a "N CHANGED" badge if any toggles in that group are dirty; Grant-all / Revoke-all still work while collapsed. State resets whenever a different role is selected so groups collapse fresh each time.
+
 ### Iteration 17 — Feb 2026 (this session)
 Massive feature push: Students tab + Roles/Permissions + Auth + Organizations.
 
@@ -120,8 +128,9 @@ Massive feature push: Students tab + Roles/Permissions + Auth + Organizations.
 - Aggregation-pipeline delete for flag category cascade.
 
 ## Test status
-- Iteration 17 backend: register / login / logout / /auth/me round-trip verified via curl. Middleware returns 401 on protected endpoints without cookie, 200 with. First user gets Director + super-admin. Second user without invite defaults to Parent Volunteer; redeem flow correctly assigns invite role + org_id. `/organizations` + `/organizations/members` + `/invites` all verified with real data.
-- Iteration 17 frontend: Login, Onboarding, Students tab, Roles matrix and Organization tab all screenshot-verified at 1440×900.
+- **Iteration 17 backend**: 19/19 iteration_10 pytest tests pass after the cross-org role isolation fix (iteration_11 re-run). Auth flow (register → me → login → logout), students CRUD + config + stats + invite, roles matrix (10 presets, 34 keys, clone_from, delete blocked for system roles, reset-defaults), org & invites (create org promotes to Director, invites are 10-char alphanumeric, redeem attaches role + org_id), is_live show toggle attaches/releases costumes, `_detach_item_from_all_maps` runs on move/update/delete. **Fix landed**: POST /api/roles now stamps `org_id` from the authenticated session; `_create_new_org` clones only Default Org's `is_system=true` roles; Role Pydantic model exposes `org_id`. Custom roles no longer leak across orgs.
+- **Iteration 17 frontend**: Login page, Onboarding page, Students tab, Roles matrix and Organization tab all screenshot-verified at 1440×900 through the /login → protected-route flow.
+- **Known pre-existing failures** (unchanged, out of scope): 4 legacy backend_test.py tests still reference removed schema fields (`original_show_id`, `additional_show_ids`, `link_timestamp`, old group_full_flow).
 - No known blocking issues.
 
 ## Test credentials
